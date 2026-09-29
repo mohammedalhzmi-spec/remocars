@@ -1,5 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
 <resources>
     <string name="app_name">REMOCAR 3D</string>
-    <string name="title_activity_main">REMOCAR 3D Racing</string>
+    <string name="title_activity_main">REMOCAR 3D</string>
     <string name="package_name">com.mohammedalhzmi.remocar</string>
+    <string name="custom_url_scheme">com.mohammedalhzmi.remocar</string>
 </resources>

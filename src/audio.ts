@@ -5,6 +5,8 @@ class SoundManager {
   private enabled: boolean = true;
   private ambientGain: GainNode | null = null;
   private isAmbientPlaying: boolean = false;
+  private engineOsc: OscillatorNode | null = null;
+  private engineGain: GainNode | null = null;
 
   constructor() {}
 
@@ -48,6 +50,36 @@ class SoundManager {
 
   public playStartBeep(isFinal = false) {
     this.playBeep(isFinal ? 880 : 440, 0.3, 'triangle');
+  }
+
+  public playEngine(throttle: number) {
+    if (!this.enabled) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+      if (!this.engineOsc || !this.engineGain) {
+        this.engineOsc = this.ctx.createOscillator();
+        this.engineGain = this.ctx.createGain();
+        this.engineOsc.type = 'sawtooth';
+        this.engineOsc.frequency.value = 62;
+        this.engineGain.gain.value = 0;
+        this.engineOsc.connect(this.engineGain);
+        this.engineGain.connect(this.ctx.destination);
+        this.engineOsc.start();
+      }
+      const now = this.ctx.currentTime;
+      const amount = Math.max(0, Math.min(1, throttle));
+      this.engineOsc.frequency.setTargetAtTime(58 + amount * 132, now, 0.08);
+      this.engineGain.gain.setTargetAtTime(amount > 0.08 ? 0.025 + amount * 0.035 : 0, now, 0.09);
+    } catch {
+      // Audio is an enhancement; keep the race running if a device blocks it.
+    }
+  }
+
+  public stopEngine() {
+    if (this.engineGain && this.ctx) {
+      this.engineGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
+    }
   }
 
   public playNitro() {

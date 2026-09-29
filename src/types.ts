@@ -11,6 +11,13 @@ export interface Car {
   unlocked: boolean;
   imageIcon: string;
   modelType: 'sport' | 'drift' | 'monster' | 'cyber';
+  customization?: CarCustomization;
+}
+
+export interface CarCustomization {
+  pattern: 'solid' | 'stripes' | 'flames' | 'geometric';
+  plateText: string;
+  decalDataUrl?: string;
 }
 
 export interface Track {

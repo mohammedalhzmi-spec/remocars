@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { User, Award, Shield, Sparkles, X, Check } from 'lucide-react';
 import { PlayerProfile } from '../types';
 import { soundManager } from '../audio';
@@ -17,6 +17,10 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
   onClose,
 }) => {
   const [nameInput, setNameInput] = useState(profile.name);
+
+  useEffect(() => {
+    if (isOpen) setNameInput(profile.name);
+  }, [isOpen, profile.name]);
 
   if (!isOpen) return null;
 
@@ -77,6 +81,8 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
             <label className="block text-xs font-semibold text-slate-400 mb-1">اسم المتسابق</label>
             <input
               type="text"
+              dir="auto"
+              maxLength={18}
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
               placeholder="أدخل اسمك المستعار..."

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Volume2, VolumeX, Trophy, Coins, Github, Wrench, Flag, Home, User, Medal } from 'lucide-react';
+import gameIcon from '../assets/images/remocar_game_icon.webp';
 
 interface NavbarProps {
   coins: number;
@@ -32,8 +33,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={() => onNavigate('menu')}
           className="flex items-center gap-3 cursor-pointer group"
         >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-600 to-amber-500 flex items-center justify-center shadow-lg shadow-red-500/30 group-hover:scale-105 transition-transform">
-            <span className="text-2xl">🏎️</span>
+          <div className="w-10 h-10 rounded-xl overflow-hidden border border-amber-400/30 shadow-lg shadow-red-500/30 group-hover:scale-105 transition-transform">
+            <img src={gameIcon} alt="أيقونة REMOCAR" className="h-full w-full object-cover" />
           </div>
           <div>
             <h1 className="text-xl font-black tracking-wider bg-gradient-to-r from-red-400 via-amber-300 to-yellow-400 bg-clip-text text-transparent">

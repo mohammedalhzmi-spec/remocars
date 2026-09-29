@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Car, Track, Upgrade, ReplayFrame, LeaderboardEntry, PlayerProfile } from './types';
 import { INITIAL_CARS, INITIAL_TRACKS, INITIAL_UPGRADES } from './data/gameData';
+import { MULTIPLAYER_TRACKS } from './data/multiplayerTracks';
 import { Navbar } from './components/Navbar';
 import { MainMenu } from './components/MainMenu';
 import { Garage } from './components/Garage';
 import { TrackSelect } from './components/TrackSelect';
-import { GameCanvas } from './components/GameCanvas';
 import { SyncModal } from './components/SyncModal';
 import { InstructionsModal } from './components/InstructionsModal';
 import { DailyRewardModal } from './components/DailyRewardModal';
@@ -16,6 +16,9 @@ import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { PlayerProfileModal } from './components/PlayerProfileModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import { soundManager } from './audio';
+import { lanMultiplayer } from './app/lanMultiplayer';
+
+const GameCanvas = React.lazy(() => import('./components/GameCanvas').then((module) => ({ default: module.GameCanvas })));
 
 interface Mission {
   id: string;
@@ -85,6 +88,7 @@ export default function App() {
   const [isInstructionsOpen, setIsInstructionsOpen] = useState<boolean>(false);
   const [isMissionsOpen, setIsMissionsOpen] = useState<boolean>(false);
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState<boolean>(false);
+  const [isMultiplayerRoom, setIsMultiplayerRoom] = useState<boolean>(false);
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState<boolean>(false);
 
@@ -121,6 +125,11 @@ export default function App() {
     }
   };
 
+  const handleCustomizeCar = (updatedCar: Car) => {
+    setCars((prev) => prev.map((car) => car.id === updatedCar.id ? updatedCar : car));
+    setSelectedCar((current) => current.id === updatedCar.id ? updatedCar : current);
+  };
+
   const handleUpgradeItem = (upgrade: Upgrade) => {
     if (coins >= upgrade.cost && upgrade.level < upgrade.maxLevel) {
       setCoins((c) => c - upgrade.cost);
@@ -141,6 +150,8 @@ export default function App() {
   };
 
   const handleClaimMission = (missionId: string, reward: number) => {
+    const mission = missions.find((item) => item.id === missionId);
+    if (!mission || mission.completed) return;
     setCoins((c) => c + reward);
     setMissions((prev) =>
       prev.map((m) => (m.id === missionId ? { ...m, completed: true } : m))
@@ -153,15 +164,15 @@ export default function App() {
     setCoins((c) => c + finalEarned);
     
     // Gain XP and check Level up
-    const newXp = profile.xp + 150;
+    const newXp = profile.xp + (won ? 180 : 80);
     let newLevel = profile.level;
     let newTitle = profile.title;
-    if (newXp >= newLevel * 500) {
+    while (newXp >= newLevel * 500) {
       newLevel += 1;
       if (newLevel >= 5) newTitle = 'أساطير السباقات المطلقة';
       else if (newLevel >= 3) newTitle = 'متسابق محترف معتمد';
-      setToastMessage(`تهانينا! لقد ارتفعت إلى المستوى ${newLevel} وحصلت على ميزات خارقة!`);
     }
+    if (newLevel > profile.level) setToastMessage(`تهانينا! وصلت إلى المستوى ${newLevel} وفتحت مزايا جديدة!`);
     setProfile({ ...profile, xp: newXp, level: newLevel, title: newTitle });
 
     if (won) {
@@ -221,6 +232,7 @@ export default function App() {
         {screen === 'menu' && (
           <MainMenu
             selectedCar={selectedCar}
+            playerName={profile.name}
             hasReplay={replayFrames.length > 0}
             onNavigate={(s) => setScreen(s)}
             onOpenInstructions={() => setIsInstructionsOpen(true)}
@@ -238,6 +250,7 @@ export default function App() {
             onSelectCar={(car) => setSelectedCar(car)}
             onBuyCar={handleBuyCar}
             onUpgradeItem={handleUpgradeItem}
+            onCustomizeCar={handleCustomizeCar}
           />
         )}
 
@@ -245,6 +258,7 @@ export default function App() {
           <TrackSelect
             tracks={tracks}
             onSelectTrack={(track) => {
+              setIsMultiplayerRoom(false);
               setSelectedTrack(track);
               setScreen('game');
             }}
@@ -253,27 +267,35 @@ export default function App() {
         )}
 
         {screen === 'game' && selectedTrack && (
-          <GameCanvas
-            car={selectedCar}
-            track={selectedTrack}
-            profile={profile}
-            leaderboardEntry={currentTrackLeaderboard}
-            isReplayMode={false}
-            onFinishRace={handleFinishRace}
-            onQuit={() => setScreen('tracks')}
-          />
+          <React.Suspense fallback={<div className="min-h-[70vh] grid place-items-center text-amber-300">جارٍ تحميل محرك السباق ثلاثي الأبعاد…</div>}>
+            <GameCanvas
+              car={selectedCar}
+              track={selectedTrack}
+              profile={profile}
+              upgrades={upgrades}
+              leaderboardEntry={currentTrackLeaderboard}
+              isReplayMode={false}
+              isMultiplayerRoom={isMultiplayerRoom}
+              onFinishRace={handleFinishRace}
+              onQuit={() => { if (isMultiplayerRoom) lanMultiplayer.close(); setIsMultiplayerRoom(false); setScreen('tracks'); }}
+            />
+          </React.Suspense>
         )}
 
         {screen === 'replay' && selectedTrack && (
-          <GameCanvas
-            car={selectedCar}
-            track={selectedTrack}
-            profile={profile}
-            isReplayMode={true}
-            replayFrames={replayFrames}
-            onFinishRace={() => setScreen('menu')}
-            onQuit={() => setScreen('menu')}
-          />
+          <React.Suspense fallback={<div className="min-h-[70vh] grid place-items-center text-amber-300">جارٍ تحميل إعادة السباق…</div>}>
+            <GameCanvas
+              car={selectedCar}
+              track={selectedTrack}
+              profile={profile}
+              upgrades={upgrades}
+              isReplayMode={true}
+              isMultiplayerRoom={false}
+              replayFrames={replayFrames}
+              onFinishRace={() => setScreen('menu')}
+              onQuit={() => setScreen('menu')}
+            />
+          </React.Suspense>
         )}
       </main>
 
@@ -306,12 +328,16 @@ export default function App() {
       <MultiplayerLobby
         isOpen={isMultiplayerOpen}
         selectedCar={selectedCar}
+        playerName={profile.name}
+        tracks={MULTIPLAYER_TRACKS}
         onClose={() => setIsMultiplayerOpen(false)}
-        onStartMultiplayerRace={(code) => {
+        onStartMultiplayerRace={(code, trackId) => {
           setIsMultiplayerOpen(false);
-          setSelectedTrack(tracks[0]);
+          const roomTrack = MULTIPLAYER_TRACKS.find((track) => track.id === trackId) || tracks[0];
+          setSelectedTrack(roomTrack);
+          setIsMultiplayerRoom(true);
           setScreen('game');
-          setToastMessage(`تم بدء السباق الجماعي عبر الشبكة المحلية (غرفة: ${code})!`);
+          setToastMessage(`بدأ السباق الجماعي على ${roomTrack.name} (غرفة ${code}).`);
         }}
       />
 

@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Wrench, Flag, Trophy, Sparkles, Gamepad2, Target, Video, Wifi } from 'lucide-react';
 import { Car } from '../types';
+import heroBanner from '../assets/images/remocar_home_hero.webp';
+import gameIcon from '../assets/images/remocar_game_icon.webp';
 
 interface MainMenuProps {
   selectedCar: Car;
+  playerName: string;
   hasReplay: boolean;
   onNavigate: (screen: 'menu' | 'garage' | 'tracks' | 'game' | 'replay') => void;
   onOpenInstructions: () => void;
@@ -13,6 +16,7 @@ interface MainMenuProps {
 
 export const MainMenu: React.FC<MainMenuProps> = ({
   selectedCar,
+  playerName,
   hasReplay,
   onNavigate,
   onOpenInstructions,
@@ -24,33 +28,35 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   useEffect(() => {
     const interval = setInterval(() => {
       setShowCopyright((prev) => !prev);
-    }, 4000);
+    }, 3500);
     return () => clearInterval(interval);
   }, []);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 animate-fadeIn">
       {/* Developer Copyright Pulsing Banner */}
-      <div className={`mb-6 text-center transition-opacity duration-1000 ${showCopyright ? 'opacity-100' : 'opacity-40'}`}>
+      <div aria-live="polite" className={`mb-6 text-center transition-opacity duration-1000 ${showCopyright ? 'opacity-100' : 'opacity-0'}`}>
         <div className="inline-block bg-amber-500/10 border border-amber-500/30 text-amber-400 px-6 py-2 rounded-2xl text-xs md:text-sm font-bold shadow-lg shadow-amber-500/10 backdrop-blur-md">
-          ✨ هذه اللعبة من برمجة وتطوير المطور محمد الحزمي - جميع الحقوق محفوظة 2026 ✨
+          <span className="block">هذه اللعبة من برمجة وتطوير المطور محمد الحزمي</span>
+          <span className="block">جميع الحقوق محفوظة 2026</span>
         </div>
       </div>
 
       {/* Hero Banner with Generated AI Image */}
-      <div className="relative overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl mb-10 text-right">
+      <div className="relative min-h-[420px] overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl mb-10 text-right">
         <div className="absolute inset-0 z-0">
           <img
-            src="/src/assets/images/remocar_hero_banner_1790711398940.jpg"
-            alt="Remocar Hero Banner"
+            src={heroBanner}
+            alt="سيارة REMOCAR على طريق جبلي سريع"
             referrerPolicy="no-referrer"
-            className="w-full h-full object-cover opacity-40 hover:opacity-50 transition-opacity duration-700"
+            className="w-full h-full object-cover opacity-75 transition-opacity duration-700"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-l from-slate-950/95 via-slate-950/55 to-slate-950/10" />
         </div>
 
         <div className="relative z-10 p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-8">
           <div className="max-w-xl">
+            <p className="mb-3 text-xs font-bold text-amber-200">أهلاً {playerName} · موسم السباقات الجديد</p>
             <div className="inline-flex items-center gap-2 bg-red-500/20 border border-red-500/40 text-red-300 px-3.5 py-1.5 rounded-full text-xs font-bold mb-4 shadow-sm backdrop-blur-md">
               <Sparkles className="w-4 h-4" />
               <span>دعم اللعب الجماعي عبر Wi-Fi المحلي بدون إنترنت</span>
@@ -92,7 +98,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-3xl p-6 shadow-2xl w-full md:w-80 text-center relative group">
             <div className="absolute top-3 right-3 w-10 h-10 rounded-2xl overflow-hidden border border-amber-500/40 shadow-md">
               <img
-                src="/src/assets/images/remocar_game_icon_1790711410748.jpg"
+                src={gameIcon}
                 alt="Remocar Icon"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover"
