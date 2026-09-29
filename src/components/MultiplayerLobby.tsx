@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Wifi, Users, Play, Plus, ArrowRight, X, Sparkles, CheckCircle2 } from 'lucide-react';
 import { Car } from '../types';
 import { soundManager } from '../audio';
