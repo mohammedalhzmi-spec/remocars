@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Car, Track, ReplayFrame } from '../types';
 import { soundManager } from '../audio';
-import { Trophy, Coins, Flag, ArrowRight, Zap, Thermometer, Compass, CloudRain, Sun, CloudFog, Camera } from 'lucide-react';
+import { Trophy, Coins, Flag, ArrowRight, Zap, Thermometer, Compass, CloudRain, Sun, CloudFog, Camera, Flame } from 'lucide-react';
 
 interface GameCanvasProps {
   car: Car;
@@ -52,7 +52,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [nitroActive, setNitroActive] = useState<boolean>(false);
   const [nitroCharge, setNitroCharge] = useState<number>(100);
 
-  // Camera Mode: 'chase' | 'bumper' | 'topdown'
+  // Drift Challenge State
+  const [driftScore, setDriftScore] = useState<number>(0);
+  const [driftMultiplier, setDriftMultiplier] = useState<number>(1);
+  const isDriftingRef = useRef<boolean>(false);
+
+  // Camera Mode
   const [cameraMode, setCameraMode] = useState<'chase' | 'bumper' | 'topdown'>('chase');
 
   // Weather state
@@ -61,15 +66,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     return types[Math.floor(Math.random() * types.length)];
   });
 
-  // Replay recording
+  // Replay & particles
   const recordedFramesRef = useRef<ReplayFrame[]>([]);
   const replayIndexRef = useRef<number>(0);
-
-  // Particles ref (tire smoke & dust)
   const particlesRef = useRef<Particle[]>([]);
-
-  // Controls state
   const keysRef = useRef<{ [key: string]: boolean }>({});
+
+  // Start ambient audio
+  useEffect(() => {
+    soundManager.startAmbient(weather);
+  }, [weather]);
 
   // 3D Physics State
   const slipFactor = weather === 'rainy' ? 0.99 : 0.982;
@@ -86,7 +92,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     friction: slipFactor,
   });
 
-  // 6 3D AI Competitors
   const aiCarsRef = useRef<AICar[]>([
     { x: 440, y: 530, angle: -Math.PI / 2, speed: 6.0, color: '#3b82f6', lap: 1, checkpoint: 0, maxSpeed: 7.2 },
     { x: 480, y: 560, angle: -Math.PI / 2, speed: 5.7, color: '#10b981', lap: 1, checkpoint: 0, maxSpeed: 7.0 },
@@ -96,7 +101,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     { x: 640, y: 680, angle: -Math.PI / 2, speed: 5.6, color: '#06b6d4', lap: 1, checkpoint: 0, maxSpeed: 7.1 },
   ]);
 
-  // Raindrops particles
   const raindropsRef = useRef<{ x: number; y: number; z: number; speed: number }[]>(
     Array.from({ length: 150 }, () => ({
       x: (Math.random() - 0.5) * 2000,
@@ -138,7 +142,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     }
   }, [gameState, countdownNum, isReplayMode]);
 
-  // Race timer & engine temp
+  // Race timer & engine temp & drift scoring
   useEffect(() => {
     if (gameState !== 'racing') return;
     const interval = setInterval(() => {
@@ -149,9 +153,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         if (currentSpeed > 60) return Math.min(95, temp + 0.3);
         return Math.max(45, temp - 0.5);
       });
+
+      // Drift Challenge scoring
+      if (track.isDriftMode && isDriftingRef.current) {
+        setDriftScore((s) => s + Math.round(10 * driftMultiplier));
+      }
     }, 100);
     return () => clearInterval(interval);
-  }, [gameState, nitroActive, currentSpeed]);
+  }, [gameState, nitroActive, currentSpeed, track.isDriftMode, driftMultiplier]);
 
   // Keyboard listeners & Camera toggle ('C' key)
   useEffect(() => {
@@ -169,7 +178,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       }
       if (e.code === 'KeyC') {
-        // Toggle camera mode
         setCameraMode((m) => (m === 'chase' ? 'bumper' : m === 'bumper' ? 'topdown' : 'chase'));
       }
     };
@@ -186,7 +194,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     };
   }, [nitroCharge, engineTemp, isReplayMode]);
 
-  // Main 3D Perspective Rendering Game Loop with Particle System
+  // Main game loop with drift detection and smoke particles
   useEffect(() => {
     let animationId: number;
     const canvas = canvasRef.current;
@@ -221,45 +229,45 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           st.speed *= st.friction;
         }
 
+        let isSteering = false;
         if (keys['KeyA'] || keys['ArrowLeft']) {
           if (Math.abs(st.speed) > 0.3) {
             st.angle -= st.handling * (st.speed > 0 ? 1 : -1);
-            // Spawn tire smoke/drift particles when turning hard at speed
-            if (Math.abs(st.speed) > 3) {
-              particlesRef.current.push({
-                x: st.x - Math.cos(st.angle) * 20,
-                y: st.y - Math.sin(st.angle) * 20,
-                vx: (Math.random() - 0.5) * 2,
-                vy: (Math.random() - 0.5) * 2,
-                size: 8 + Math.random() * 8,
-                alpha: 0.7,
-                color: track.id === 'desert_rally' ? '#d97706' : '#cbd5e1',
-              });
-            }
+            isSteering = true;
           }
         }
         if (keys['KeyD'] || keys['ArrowRight']) {
           if (Math.abs(st.speed) > 0.3) {
             st.angle += st.handling * (st.speed > 0 ? 1 : -1);
-            if (Math.abs(st.speed) > 3) {
-              particlesRef.current.push({
-                x: st.x - Math.cos(st.angle) * 20,
-                y: st.y - Math.sin(st.angle) * 20,
-                vx: (Math.random() - 0.5) * 2,
-                vy: (Math.random() - 0.5) * 2,
-                size: 8 + Math.random() * 8,
-                alpha: 0.7,
-                color: track.id === 'desert_rally' ? '#d97706' : '#cbd5e1',
-              });
-            }
+            isSteering = true;
           }
+        }
+
+        // Detect Drifting
+        if (isSteering && Math.abs(st.speed) > 4) {
+          isDriftingRef.current = true;
+          setDriftMultiplier((m) => Math.min(5, Number((m + 0.05).toFixed(1))));
+          soundManager.playDriftScreech();
+
+          // Spawn smoke particles
+          particlesRef.current.push({
+            x: st.x - Math.cos(st.angle) * 25,
+            y: st.y - Math.sin(st.angle) * 25,
+            vx: (Math.random() - 0.5) * 3,
+            vy: (Math.random() - 0.5) * 3,
+            size: 10 + Math.random() * 10,
+            alpha: 0.8,
+            color: track.id === 'desert_rally' ? '#d97706' : '#e2e8f0',
+          });
+        } else {
+          isDriftingRef.current = false;
+          setDriftMultiplier(1);
         }
 
         st.x += Math.cos(st.angle) * st.speed;
         st.y += Math.sin(st.angle) * st.speed;
         setCurrentSpeed(Math.round(Math.abs(st.speed) * 35));
 
-        // Record replay frame
         recordedFramesRef.current.push({
           x: st.x,
           y: st.y,
@@ -267,7 +275,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           speed: st.speed,
         });
 
-        // Boundary checks
+        // Boundary collision
         if (st.x < 100 || st.x > 2400 || st.y < 100 || st.y > 2200) {
           st.speed *= -0.4;
           soundManager.playCrash();
@@ -285,7 +293,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           }
         });
 
-        // Update AI Cars
+        // Update AI
         aiCarsRef.current.forEach((ai) => {
           const target = waypoints[ai.checkpoint];
           const angleToTarget = Math.atan2(target.y - ai.y, target.x - ai.x);
@@ -311,21 +319,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         });
       }
 
-      // Update Smoke / Dust Particles
+      // Update smoke particles
       particlesRef.current.forEach((p) => {
         p.x += p.vx;
         p.y += p.vy;
-        p.size += 0.4;
-        p.alpha -= 0.03;
+        p.size += 0.5;
+        p.alpha -= 0.025;
       });
       particlesRef.current = particlesRef.current.filter((p) => p.alpha > 0);
 
-      // --- RENDERING 3D PERSPECTIVE WITH CAMERA MODES ---
+      // --- RENDERING ---
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const st = carStateRef.current;
-      const cameraX = cameraMode === 'bumper' ? st.x + Math.cos(st.angle) * 30 : cameraMode === 'topdown' ? st.x : st.x;
-      const cameraY = cameraMode === 'bumper' ? st.y + Math.sin(st.angle) * 30 : cameraMode === 'topdown' ? st.y : st.y;
+      const cameraX = cameraMode === 'bumper' ? st.x + Math.cos(st.angle) * 30 : st.x;
+      const cameraY = cameraMode === 'bumper' ? st.y + Math.sin(st.angle) * 30 : st.y;
       const cameraAngle = st.angle;
       const zoom = cameraMode === 'topdown' ? 0.6 : cameraMode === 'bumper' ? 1.4 : 1.0;
 
@@ -335,14 +343,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.rotate(-cameraAngle - Math.PI / 2);
       ctx.translate(-cameraX, -cameraY);
 
-      // Ground Background
       const groundGrad = ctx.createRadialGradient(cameraX, cameraY, 100, cameraX, cameraY, 1800);
       groundGrad.addColorStop(0, '#1e293b');
       groundGrad.addColorStop(1, '#090d16');
       ctx.fillStyle = groundGrad;
       ctx.fillRect(cameraX - 2000, cameraY - 2000, 4000, 4000);
 
-      // 3D Track Circuit Road
+      // Track Road
       ctx.strokeStyle = '#334155';
       ctx.lineWidth = 180;
       ctx.lineCap = 'round';
@@ -353,7 +360,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.closePath();
       ctx.stroke();
 
-      // Kerb Stripes
       ctx.strokeStyle = '#dc2626';
       ctx.lineWidth = 190;
       ctx.setLineDash([30, 30]);
@@ -364,7 +370,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Asphalt Surface
       ctx.fillStyle = '#0b0f19';
       ctx.beginPath();
       ctx.moveTo(400, 500);
@@ -372,17 +377,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.closePath();
       ctx.fill();
 
-      // Start/Finish Line
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 12;
-      ctx.setLineDash([15, 15]);
-      ctx.beginPath();
-      ctx.moveTo(400, 400);
-      ctx.lineTo(400, 600);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Draw Particles (Smoke / Dust)
+      // Smoke / Dust particles
       particlesRef.current.forEach((p) => {
         ctx.save();
         ctx.globalAlpha = Math.max(0, p.alpha);
@@ -393,7 +388,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.restore();
       });
 
-      // Draw Coins
+      // Coins
       coinsRef.current.forEach((coin) => {
         if (!coin.collected) {
           ctx.save();
@@ -414,12 +409,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       });
 
-      // Draw AI Cars
+      // AI Cars
       aiCarsRef.current.forEach((ai) => {
         ctx.save();
         ctx.translate(ai.x, ai.y);
         ctx.rotate(ai.angle);
-
         ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
         ctx.beginPath();
         ctx.ellipse(0, 5, 26, 14, 0, 0, Math.PI * 2);
@@ -432,14 +426,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
         ctx.stroke();
-
-        ctx.fillStyle = '#1e293b';
-        ctx.fillRect(-10, -11, 20, 22);
-
         ctx.restore();
       });
 
-      // Draw Player Car (unless bumper mode)
+      // Player Car
       if (cameraMode !== 'bumper') {
         ctx.save();
         ctx.translate(st.x, st.y);
@@ -483,20 +473,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       ctx.restore();
 
-      // Weather Raindrops
-      if (weather === 'rainy') {
-        ctx.strokeStyle = 'rgba(186, 230, 253, 0.7)';
-        ctx.lineWidth = 2;
-        raindropsRef.current.forEach((drop) => {
-          ctx.beginPath();
-          ctx.moveTo(drop.x, drop.y);
-          ctx.lineTo(drop.x - 4, drop.y + 20);
-          ctx.stroke();
-          drop.y += drop.speed;
-          if (drop.y > canvas.height) drop.y = -20;
-        });
-      }
-
       animationId = requestAnimationFrame(updateGame);
     };
 
@@ -517,19 +493,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             <Coins className="w-5 h-5 text-amber-400" />
             <span>العملات: {coinsCollected}</span>
           </div>
-          <div className="flex items-center gap-2 text-xs bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 text-slate-300">
-            {weather === 'sunny' && <><Sun className="w-4 h-4 text-amber-400" /><span>الطقس: مشمس</span></>}
-            {weather === 'rainy' && <><CloudRain className="w-4 h-4 text-sky-400" /><span>الطقس: ممطر</span></>}
-            {weather === 'foggy' && <><CloudFog className="w-4 h-4 text-slate-400" /><span>الطقس: ضبابي</span></>}
-          </div>
+          {track.isDriftMode && (
+            <div className="flex items-center gap-2 text-amber-400 font-bold bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-xl">
+              <Flame className="w-4 h-4 animate-bounce text-amber-400" />
+              <span>نقاط الدريفت: {driftScore} (x{driftMultiplier})</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Camera Toggle Button */}
           <button
             onClick={() => setCameraMode((m) => (m === 'chase' ? 'bumper' : m === 'bumper' ? 'topdown' : 'chase'))}
             className="flex items-center gap-2 bg-indigo-600/30 border border-indigo-500/50 hover:bg-indigo-600/50 text-indigo-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
-            title="تغيير زاوية الكاميرا [مفتاح C]"
           >
             <Camera className="w-4 h-4" />
             <span>الكاميرا: {cameraMode === 'chase' ? 'خلف السيارة' : cameraMode === 'bumper' ? 'من المصد' : 'علوية'}</span>
@@ -557,7 +532,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         </div>
       </div>
 
-      {/* Canvas Arena */}
+      {/* Canvas Arena with HUD */}
       <div className="relative rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950 flex justify-center">
         <canvas
           ref={canvasRef}
@@ -566,7 +541,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           className="w-full max-w-full h-auto aspect-[16/10] block"
         />
 
-        {/* HUD Overlays: Speedometer, Engine Temp, Mini-map */}
+        {/* Speedometer */}
         <div className="absolute bottom-6 left-6 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-3xl shadow-2xl flex items-center gap-4 text-white">
           <div className="relative w-20 h-20 rounded-full bg-slate-950 border-4 border-slate-800 flex flex-col items-center justify-center shadow-inner">
             <span className="text-2xl font-black text-red-500">{currentSpeed}</span>
@@ -583,6 +558,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           </div>
         </div>
 
+        {/* Engine Temp */}
         <div className="absolute bottom-6 left-52 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-3xl shadow-2xl flex items-center gap-3 text-white">
           <Thermometer className={`w-6 h-6 ${engineTemp > 95 ? 'text-red-500 animate-bounce' : 'text-amber-400'}`} />
           <div>
@@ -591,6 +567,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           </div>
         </div>
 
+        {/* Mini-map */}
         <div className="absolute top-6 right-6 w-36 h-36 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-3xl shadow-2xl overflow-hidden p-2 flex flex-col items-center justify-center relative">
           <div className="absolute top-2 right-3 text-[10px] text-slate-400 font-bold flex items-center gap-1">
             <Compass className="w-3 h-3 text-red-500" />
@@ -607,7 +584,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             <span className="text-8xl font-black text-red-500 mb-4 animate-bounce">
               {countdownNum > 0 ? countdownNum : 'انطلق!'}
             </span>
-            <p className="text-slate-300 text-lg font-bold">معزز بنظام جزيئات الدخان والتحكم بالكاميرا...</p>
+            <p className="text-slate-300 text-lg font-bold">جاهز لتحدي الدريفت الملحمي بدون إنترنت...</p>
           </div>
         )}
 
@@ -618,12 +595,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             </div>
             <h2 className="text-4xl font-black text-white mb-2">أهلاً بك على منصة التتويج!</h2>
             <p className="text-slate-400 text-sm mb-6">
-              التوقيت الإجمالي: <span className="text-white font-bold">{raceTime.toFixed(1)} ثانية</span> | العملات المكتسبة: <span className="text-amber-400 font-bold">+{coinsCollected + 150}</span>
+              التوقيت: <span className="text-white font-bold">{raceTime.toFixed(1)} ث</span> | نقاط الدريفت: <span className="text-amber-400 font-bold">{driftScore}</span> | العملات: <span className="text-amber-400 font-bold">+{coinsCollected + Math.round(driftScore / 10) + 150}</span>
             </p>
 
             <div className="flex items-center gap-4">
               <button
-                onClick={() => onFinishRace(true, coinsCollected + 150, recordedFramesRef.current)}
+                onClick={() => onFinishRace(true, coinsCollected + Math.round(driftScore / 10) + 150, recordedFramesRef.current)}
                 className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-bold px-8 py-3.5 rounded-2xl shadow-lg shadow-red-600/30 transition-all text-base"
               >
                 <span>حفظ النتيجة ومشاهدة الإعادة</span>

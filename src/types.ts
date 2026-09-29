@@ -16,11 +16,12 @@ export interface Car {
 export interface Track {
   id: string;
   name: string;
-  difficulty: 'سهل' | 'متوسط' | 'صعب' | 'محترف';
+  difficulty: 'سهل' | 'متوسط' | 'صعب' | 'محترف' | 'تحدي الدريفت';
   background: string;
   laps: number;
   unlocked: boolean;
   recordTime?: number;
+  isDriftMode?: boolean;
 }
 
 export interface Upgrade {
