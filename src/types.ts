@@ -10,12 +10,13 @@ export interface Car {
   price: number;
   unlocked: boolean;
   imageIcon: string;
+  modelType: 'sport' | 'drift' | 'monster' | 'cyber';
 }
 
 export interface Track {
   id: string;
   name: string;
-  difficulty: 'سهل' | 'متوسط' | 'صعب';
+  difficulty: 'سهل' | 'متوسط' | 'صعب' | 'محترف';
   background: string;
   laps: number;
   unlocked: boolean;
@@ -32,8 +33,9 @@ export interface Upgrade {
   description: string;
 }
 
-export interface GameSettings {
-  soundEnabled: boolean;
-  musicEnabled: boolean;
-  controlType: 'keyboard' | 'buttons';
+export interface ReplayFrame {
+  x: number;
+  y: number;
+  angle: number;
+  speed: number;
 }

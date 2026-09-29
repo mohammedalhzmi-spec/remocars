@@ -1,16 +1,18 @@
 import React from 'react';
-import { Play, Wrench, Flag, Trophy, Sparkles, Gamepad2, Target, Palette } from 'lucide-react';
+import { Play, Wrench, Flag, Trophy, Sparkles, Gamepad2, Target, Video } from 'lucide-react';
 import { Car } from '../types';
 
 interface MainMenuProps {
   selectedCar: Car;
-  onNavigate: (screen: 'menu' | 'garage' | 'tracks' | 'game') => void;
+  hasReplay: boolean;
+  onNavigate: (screen: 'menu' | 'garage' | 'tracks' | 'game' | 'replay') => void;
   onOpenInstructions: () => void;
   onOpenMissions: () => void;
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({
   selectedCar,
+  hasReplay,
   onNavigate,
   onOpenInstructions,
   onOpenMissions,
@@ -34,13 +36,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           <div className="max-w-xl">
             <div className="inline-flex items-center gap-2 bg-red-500/20 border border-red-500/40 text-red-300 px-3.5 py-1.5 rounded-full text-xs font-bold mb-4 shadow-sm backdrop-blur-md">
               <Sparkles className="w-4 h-4" />
-              <span>النسخة الاحترافية المحدثة مع مكافآت يومية</span>
+              <span>نظام الطقس المتغير وجرافكس 3D واقعي</span>
             </div>
             <h2 className="text-3xl md:text-5xl font-black text-white mb-4 leading-tight drop-shadow-md">
               سباق سيارات التحكم عن بعد <span className="bg-gradient-to-r from-red-400 via-amber-300 to-yellow-300 bg-clip-text text-transparent">REMOCAR</span>
             </h2>
             <p className="text-slate-200 text-base md:text-lg mb-6 leading-relaxed drop-shadow">
-              انطلق بأقصى سرعة، تفادى المنعطفات، اجمع العملات المعدنية، وقم بترقية سيارتك لتصبح بطل حلبات الريموت كنترول!
+              انطلق بأقصى سرعة في حلبات ثلاثية الأبعاد مذهلة مع منافسين أشرس، ظروف طقس متغيرة (مشمش، ممطر، وضبابي)، وإعادة السباق!
             </p>
             <div className="flex flex-wrap items-center gap-4">
               <button
@@ -50,6 +52,15 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                 <Play className="w-6 h-6 fill-current" />
                 <span>ابدأ السباق الآن</span>
               </button>
+              {hasReplay && (
+                <button
+                  onClick={() => onNavigate('replay')}
+                  className="flex items-center gap-3 bg-emerald-600/90 hover:bg-emerald-600 backdrop-blur-md border border-emerald-400/30 text-white font-bold px-6 py-4 rounded-2xl shadow-lg transition-all hover:scale-105 active:scale-95 text-base"
+                >
+                  <Video className="w-5 h-5 text-amber-300 animate-pulse" />
+                  <span>مشاهدة إعادة السباق</span>
+                </button>
+              )}
               <button
                 onClick={onOpenMissions}
                 className="flex items-center gap-3 bg-indigo-600/80 hover:bg-indigo-600 backdrop-blur-md border border-indigo-400/30 text-white font-bold px-6 py-4 rounded-2xl shadow-lg transition-all hover:scale-105 active:scale-95 text-base"
@@ -122,7 +133,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <Flag className="w-6 h-6" />
           </div>
           <h3 className="text-lg font-bold text-white mb-2">الحلبات والمسارات</h3>
-          <p className="text-sm text-slate-400">اختر من بين 4 حلبات متميزة بتحديات مختلفة.</p>
+          <p className="text-sm text-slate-400">اختر من بين 4 حلبات متميزة مع طقس ديناميكي.</p>
         </div>
 
         <div 
@@ -133,7 +144,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <Wrench className="w-6 h-6" />
           </div>
           <h3 className="text-lg font-bold text-white mb-2">المرآب والتطوير</h3>
-          <p className="text-sm text-slate-400">افتح سيارات جديدة وطور المحرك والنيترو.</p>
+          <p className="text-sm text-slate-400">افتح سيارات 3D جديدة وطور المحرك والنيترو.</p>
         </div>
 
         <div 

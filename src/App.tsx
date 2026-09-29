@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Car, Track, Upgrade } from './types';
+import { Car, Track, Upgrade, ReplayFrame } from './types';
 import { INITIAL_CARS, INITIAL_TRACKS, INITIAL_UPGRADES } from './data/gameData';
 import { Navbar } from './components/Navbar';
 import { MainMenu } from './components/MainMenu';
@@ -21,7 +21,7 @@ interface Mission {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<'menu' | 'garage' | 'tracks' | 'game'>('menu');
+  const [screen, setScreen] = useState<'menu' | 'garage' | 'tracks' | 'game' | 'replay'>('menu');
   const [coins, setCoins] = useState<number>(() => {
     const saved = localStorage.getItem('remocar_coins');
     return saved ? parseInt(saved, 10) : 350;
@@ -46,17 +46,22 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_TRACKS;
   });
 
-  const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
+  const [selectedTrack, setSelectedTrack] = useState<Track | null>(() => INITIAL_TRACKS[0]);
 
   const [upgrades, setUpgrades] = useState<Upgrade[]>(() => {
     const saved = localStorage.getItem('remocar_upgrades');
     return saved ? JSON.parse(saved) : INITIAL_UPGRADES;
   });
 
+  const [replayFrames, setReplayFrames] = useState<ReplayFrame[]>(() => {
+    const saved = localStorage.getItem('remocar_last_replay');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   const [missions, setMissions] = useState<Mission[]>([
-    { id: 'm1', title: 'إكمال سباق واحد على الأقل', reward: 150, completed: false },
-    { id: 'm2', title: 'جمع 50 عملة ذهبية داخل الحلبة', reward: 200, completed: false },
-    { id: 'm3', title: 'ترقية قطع غيار السيارة', reward: 250, completed: false },
+    { id: 'm1', title: 'إكمال سباق واحد في حلبة 3D', reward: 150, completed: false },
+    { id: 'm2', title: 'جمع 50 عملة ذهبية أثناء السباق', reward: 200, completed: false },
+    { id: 'm3', title: 'ترقية أجزاء السيارة في المرآب', reward: 250, completed: false },
   ]);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -72,7 +77,10 @@ export default function App() {
     localStorage.setItem('remocar_cars', JSON.stringify(cars));
     localStorage.setItem('remocar_tracks', JSON.stringify(tracks));
     localStorage.setItem('remocar_upgrades', JSON.stringify(upgrades));
-  }, [coins, trophies, cars, tracks, upgrades]);
+    if (replayFrames.length > 0) {
+      localStorage.setItem('remocar_last_replay', JSON.stringify(replayFrames));
+    }
+  }, [coins, trophies, cars, tracks, upgrades, replayFrames]);
 
   const handleToggleSound = () => {
     const next = !soundEnabled;
@@ -120,17 +128,17 @@ export default function App() {
     setToastMessage(`أنجزت المهمة بنجاح وحصلت على +${reward} عملة!`);
   };
 
-  const handleFinishRace = (won: boolean, coinsEarned: number) => {
+  const handleFinishRace = (won: boolean, coinsEarned: number, frames: ReplayFrame[]) => {
     setCoins((c) => c + coinsEarned);
     if (won) {
       setTrophies((t) => t + 1);
       soundManager.playVictory();
     }
-    // Mark first mission completed
+    setReplayFrames(frames);
     setMissions((prev) =>
       prev.map((m) => (m.id === 'm1' ? { ...m, completed: true } : m))
     );
-    setToastMessage(`أنهيت السباق وكسبت +${coinsEarned} عملة ذهبية!`);
+    setToastMessage(`أنهيت السباق وكسبت +${coinsEarned} عملة وتم حفظ إعادة السباق!`);
     setScreen('menu');
   };
 
@@ -145,7 +153,7 @@ export default function App() {
         trophies={trophies}
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
-        onNavigate={(s) => setScreen(s)}
+        onNavigate={(s) => setScreen(s as any)}
         currentScreen={screen}
         onOpenSync={() => setIsSyncModalOpen(true)}
       />
@@ -155,6 +163,7 @@ export default function App() {
         {screen === 'menu' && (
           <MainMenu
             selectedCar={selectedCar}
+            hasReplay={replayFrames.length > 0}
             onNavigate={(s) => setScreen(s)}
             onOpenInstructions={() => setIsInstructionsOpen(true)}
             onOpenMissions={() => setIsMissionsOpen(true)}
@@ -188,8 +197,20 @@ export default function App() {
           <GameCanvas
             car={selectedCar}
             track={selectedTrack}
+            isReplayMode={false}
             onFinishRace={handleFinishRace}
             onQuit={() => setScreen('tracks')}
+          />
+        )}
+
+        {screen === 'replay' && selectedTrack && (
+          <GameCanvas
+            car={selectedCar}
+            track={selectedTrack}
+            isReplayMode={true}
+            replayFrames={replayFrames}
+            onFinishRace={() => setScreen('menu')}
+            onQuit={() => setScreen('menu')}
           />
         )}
       </main>
