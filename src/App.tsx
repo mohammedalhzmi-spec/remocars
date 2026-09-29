@@ -8,7 +8,17 @@ import { TrackSelect } from './components/TrackSelect';
 import { GameCanvas } from './components/GameCanvas';
 import { SyncModal } from './components/SyncModal';
 import { InstructionsModal } from './components/InstructionsModal';
+import { DailyRewardModal } from './components/DailyRewardModal';
+import { MissionsPanel } from './components/MissionsPanel';
+import { NotificationToast } from './components/NotificationToast';
 import { soundManager } from './audio';
+
+interface Mission {
+  id: string;
+  title: string;
+  reward: number;
+  completed: boolean;
+}
 
 export default function App() {
   const [screen, setScreen] = useState<'menu' | 'garage' | 'tracks' | 'game'>('menu');
@@ -43,8 +53,17 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_UPGRADES;
   });
 
+  const [missions, setMissions] = useState<Mission[]>([
+    { id: 'm1', title: 'إكمال سباق واحد على الأقل', reward: 150, completed: false },
+    { id: 'm2', title: 'جمع 50 عملة ذهبية داخل الحلبة', reward: 200, completed: false },
+    { id: 'm3', title: 'ترقية قطع غيار السيارة', reward: 250, completed: false },
+  ]);
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
   const [isInstructionsOpen, setIsInstructionsOpen] = useState<boolean>(false);
+  const [isMissionsOpen, setIsMissionsOpen] = useState<boolean>(false);
 
   // Save to localStorage
   useEffect(() => {
@@ -70,6 +89,7 @@ export default function App() {
       );
       const unlockedCar = { ...car, unlocked: true };
       setSelectedCar(unlockedCar);
+      setToastMessage(`تهانينا! تمتلك الآن سيارة ${car.name}`);
     }
   };
 
@@ -83,7 +103,21 @@ export default function App() {
             : u
         )
       );
+      setToastMessage(`تمت ترقية ${upgrade.name} بنجاح إلى المستوى ${upgrade.level + 1}!`);
     }
+  };
+
+  const handleClaimDailyReward = (rewardCoins: number) => {
+    setCoins((c) => c + rewardCoins);
+    setToastMessage(`تم استلام مكافأة الدخول اليومية (+${rewardCoins} عملة)!`);
+  };
+
+  const handleClaimMission = (missionId: string, reward: number) => {
+    setCoins((c) => c + reward);
+    setMissions((prev) =>
+      prev.map((m) => (m.id === missionId ? { ...m, completed: true } : m))
+    );
+    setToastMessage(`أنجزت المهمة بنجاح وحصلت على +${reward} عملة!`);
   };
 
   const handleFinishRace = (won: boolean, coinsEarned: number) => {
@@ -92,11 +126,19 @@ export default function App() {
       setTrophies((t) => t + 1);
       soundManager.playVictory();
     }
+    // Mark first mission completed
+    setMissions((prev) =>
+      prev.map((m) => (m.id === 'm1' ? { ...m, completed: true } : m))
+    );
+    setToastMessage(`أنهيت السباق وكسبت +${coinsEarned} عملة ذهبية!`);
     setScreen('menu');
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-red-500 selection:text-white pb-12">
+      {/* Daily Reward Modal on App Load */}
+      <DailyRewardModal onClaimReward={handleClaimDailyReward} />
+
       {/* Navbar */}
       <Navbar
         coins={coins}
@@ -115,6 +157,7 @@ export default function App() {
             selectedCar={selectedCar}
             onNavigate={(s) => setScreen(s)}
             onOpenInstructions={() => setIsInstructionsOpen(true)}
+            onOpenMissions={() => setIsMissionsOpen(true)}
           />
         )}
 
@@ -151,6 +194,14 @@ export default function App() {
         )}
       </main>
 
+      {/* Toast Notification */}
+      {toastMessage && (
+        <NotificationToast
+          message={toastMessage}
+          onClose={() => setToastMessage(null)}
+        />
+      )}
+
       {/* Modals */}
       <SyncModal
         isOpen={isSyncModalOpen}
@@ -160,6 +211,13 @@ export default function App() {
       <InstructionsModal
         isOpen={isInstructionsOpen}
         onClose={() => setIsInstructionsOpen(false)}
+      />
+
+      <MissionsPanel
+        isOpen={isMissionsOpen}
+        onClose={() => setIsMissionsOpen(false)}
+        missions={missions}
+        onClaimMission={handleClaimMission}
       />
     </div>
   );
