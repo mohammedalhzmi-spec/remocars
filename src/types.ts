@@ -16,12 +16,14 @@ export interface Car {
 export interface Track {
   id: string;
   name: string;
-  difficulty: 'سهل' | 'متوسط' | 'صعب' | 'محترف' | 'تحدي الدريفت';
+  difficulty: 'سهل' | 'متوسط' | 'صعب' | 'محترف' | 'تحدي الدريفت' | 'ملحمي طويل';
   background: string;
   laps: number;
   unlocked: boolean;
   recordTime?: number;
   isDriftMode?: boolean;
+  isLongTrack?: boolean;
+  rewardMultiplier: number;
 }
 
 export interface Upgrade {
@@ -39,4 +41,17 @@ export interface ReplayFrame {
   y: number;
   angle: number;
   speed: number;
+}
+
+export interface MultiplayerPlayer {
+  id: string;
+  name: string;
+  carId: string;
+  color: string;
+  x: number;
+  y: number;
+  angle: number;
+  speed: number;
+  lap: number;
+  isReady: boolean;
 }

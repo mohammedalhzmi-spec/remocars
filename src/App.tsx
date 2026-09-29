@@ -12,6 +12,7 @@ import { DailyRewardModal } from './components/DailyRewardModal';
 import { MissionsPanel } from './components/MissionsPanel';
 import { NotificationToast } from './components/NotificationToast';
 import { SplashIntro } from './components/SplashIntro';
+import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { soundManager } from './audio';
 
 interface Mission {
@@ -61,9 +62,9 @@ export default function App() {
   });
 
   const [missions, setMissions] = useState<Mission[]>([
-    { id: 'm1', title: 'إكمال سباق 3D بنجاح', reward: 150, completed: false },
+    { id: 'm1', title: 'إكمال سباق 3D على المضامير الطويلة', reward: 200, completed: false },
     { id: 'm2', title: 'جمع العملات الذهبية في الحلبة', reward: 200, completed: false },
-    { id: 'm3', title: 'شراء أو ترقية إحدى السيارات العشر', reward: 300, completed: false },
+    { id: 'm3', title: 'تجربة اللعب الجماعي عبر Wi-Fi', reward: 300, completed: false },
   ]);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -71,6 +72,7 @@ export default function App() {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
   const [isInstructionsOpen, setIsInstructionsOpen] = useState<boolean>(false);
   const [isMissionsOpen, setIsMissionsOpen] = useState<boolean>(false);
+  const [isMultiplayerOpen, setIsMultiplayerOpen] = useState<boolean>(false);
 
   // Save to localStorage
   useEffect(() => {
@@ -131,7 +133,8 @@ export default function App() {
   };
 
   const handleFinishRace = (won: boolean, coinsEarned: number, frames: ReplayFrame[]) => {
-    setCoins((c) => c + coinsEarned);
+    const finalEarned = Math.round(coinsEarned * (selectedTrack?.rewardMultiplier || 1));
+    setCoins((c) => c + finalEarned);
     if (won) {
       setTrophies((t) => t + 1);
       soundManager.playVictory();
@@ -140,7 +143,7 @@ export default function App() {
     setMissions((prev) =>
       prev.map((m) => (m.id === 'm1' ? { ...m, completed: true } : m))
     );
-    setToastMessage(`أنهيت السباق وكسبت +${coinsEarned} عملة وتم حفظ إعادة السباق!`);
+    setToastMessage(`أنهيت السباق بنجاح وكسبت +${finalEarned} عملة ذهبية مع مكافأة المضمار!`);
     setScreen('menu');
   };
 
@@ -173,6 +176,7 @@ export default function App() {
             onNavigate={(s) => setScreen(s)}
             onOpenInstructions={() => setIsInstructionsOpen(true)}
             onOpenMissions={() => setIsMissionsOpen(true)}
+            onOpenMultiplayer={() => setIsMultiplayerOpen(true)}
           />
         )}
 
@@ -245,6 +249,18 @@ export default function App() {
         onClose={() => setIsMissionsOpen(false)}
         missions={missions}
         onClaimMission={handleClaimMission}
+      />
+
+      <MultiplayerLobby
+        isOpen={isMultiplayerOpen}
+        selectedCar={selectedCar}
+        onClose={() => setIsMultiplayerOpen(false)}
+        onStartMultiplayerRace={(code, isHost) => {
+          setIsMultiplayerOpen(false);
+          setSelectedTrack(tracks[0]);
+          setScreen('game');
+          setToastMessage(`تم بدء السباق الجماعي عبر الشبكة المحلية (غرفة: ${code})!`);
+        }}
       />
     </div>
   );

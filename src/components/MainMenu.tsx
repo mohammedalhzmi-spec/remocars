@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Wrench, Flag, Trophy, Sparkles, Gamepad2, Target, Video } from 'lucide-react';
+import { Play, Wrench, Flag, Trophy, Sparkles, Gamepad2, Target, Video, Wifi } from 'lucide-react';
 import { Car } from '../types';
 
 interface MainMenuProps {
@@ -8,6 +8,7 @@ interface MainMenuProps {
   onNavigate: (screen: 'menu' | 'garage' | 'tracks' | 'game' | 'replay') => void;
   onOpenInstructions: () => void;
   onOpenMissions: () => void;
+  onOpenMultiplayer: () => void;
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({
@@ -16,10 +17,10 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   onNavigate,
   onOpenInstructions,
   onOpenMissions,
+  onOpenMultiplayer,
 }) => {
   const [showCopyright, setShowCopyright] = useState(true);
 
-  // Fade in and out developer copyright text automatically
   useEffect(() => {
     const interval = setInterval(() => {
       setShowCopyright((prev) => !prev);
@@ -38,7 +39,6 @@ export const MainMenu: React.FC<MainMenuProps> = ({
 
       {/* Hero Banner with Generated AI Image */}
       <div className="relative overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl mb-10 text-right">
-        {/* Background Banner Image */}
         <div className="absolute inset-0 z-0">
           <img
             src="/src/assets/images/remocar_hero_banner_1790711398940.jpg"
@@ -53,13 +53,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           <div className="max-w-xl">
             <div className="inline-flex items-center gap-2 bg-red-500/20 border border-red-500/40 text-red-300 px-3.5 py-1.5 rounded-full text-xs font-bold mb-4 shadow-sm backdrop-blur-md">
               <Sparkles className="w-4 h-4" />
-              <span>10 سيارات فخمة ونظام جزيئات الدخان 3D</span>
+              <span>دعم اللعب الجماعي عبر Wi-Fi المحلي بدون إنترنت</span>
             </div>
             <h2 className="text-3xl md:text-5xl font-black text-white mb-4 leading-tight drop-shadow-md">
               سباق سيارات التحكم عن بعد <span className="bg-gradient-to-r from-red-400 via-amber-300 to-yellow-300 bg-clip-text text-transparent">REMOCAR</span>
             </h2>
             <p className="text-slate-200 text-base md:text-lg mb-6 leading-relaxed drop-shadow">
-              انطلق بأقصى سرعة في حلبات ثلاثية الأبعاد مذهلة مع 10 سيارات عالمية فخمة، زوايا كاميرا متعددة، ونظام دخان الإطارات أثناء الانجراف!
+              تنافس مع أصدقائك عبر شبكة الواي فاي المحلية (بدون إنترنت)، في مضامير طويلة وممتعة شبه واقعية مع مكافآت مضاعفة وأجواء 3D مذهلة!
             </p>
             <div className="flex flex-wrap items-center gap-4">
               <button
@@ -67,7 +67,14 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                 className="flex items-center gap-3 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-black px-8 py-4 rounded-2xl shadow-xl shadow-red-600/40 transition-all hover:scale-105 active:scale-95 text-lg"
               >
                 <Play className="w-6 h-6 fill-current" />
-                <span>ابدأ السباق الآن</span>
+                <span>السباق الفردي</span>
+              </button>
+              <button
+                onClick={onOpenMultiplayer}
+                className="flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black px-8 py-4 rounded-2xl shadow-xl shadow-indigo-600/40 transition-all hover:scale-105 active:scale-95 text-lg"
+              >
+                <Wifi className="w-6 h-6 animate-pulse" />
+                <span>اللعب الجماعي Wi-Fi</span>
               </button>
               {hasReplay && (
                 <button
@@ -75,20 +82,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                   className="flex items-center gap-3 bg-emerald-600/90 hover:bg-emerald-600 backdrop-blur-md border border-emerald-400/30 text-white font-bold px-6 py-4 rounded-2xl shadow-lg transition-all hover:scale-105 active:scale-95 text-base"
                 >
                   <Video className="w-5 h-5 text-amber-300 animate-pulse" />
-                  <span>مشاهدة إعادة السباق</span>
+                  <span>الإعادة</span>
                 </button>
               )}
-              <button
-                onClick={onOpenMissions}
-                className="flex items-center gap-3 bg-indigo-600/80 hover:bg-indigo-600 backdrop-blur-md border border-indigo-400/30 text-white font-bold px-6 py-4 rounded-2xl shadow-lg transition-all hover:scale-105 active:scale-95 text-base"
-              >
-                <Target className="w-5 h-5 text-amber-300" />
-                <span>المهام اليومية</span>
-              </button>
             </div>
           </div>
 
-          {/* Featured Car Showcase Card with Generated App Icon */}
+          {/* Featured Car Showcase Card */}
           <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-3xl p-6 shadow-2xl w-full md:w-80 text-center relative group">
             <div className="absolute top-3 right-3 w-10 h-10 rounded-2xl overflow-hidden border border-amber-500/40 shadow-md">
               <img
@@ -149,8 +149,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-4 group-hover:scale-110 transition-transform">
             <Flag className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-white mb-2">الحلبات والمسارات</h3>
-          <p className="text-sm text-slate-400">اختر من بين 4 حلبات متميزة مع طقس ديناميكي.</p>
+          <h3 className="text-lg font-bold text-white mb-2">المضامير الطويلة</h3>
+          <p className="text-sm text-slate-400">مضامير طويلة وشبه واقعية بمكافئات مضاعفة.</p>
         </div>
 
         <div 
