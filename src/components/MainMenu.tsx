@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Play, Wrench, Flag, Trophy, Sparkles, Gamepad2, Target, Video } from 'lucide-react';
 import { Car } from '../types';
 
@@ -17,8 +17,25 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   onOpenInstructions,
   onOpenMissions,
 }) => {
+  const [showCopyright, setShowCopyright] = useState(true);
+
+  // Fade in and out developer copyright text automatically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setShowCopyright((prev) => !prev);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 animate-fadeIn">
+      {/* Developer Copyright Pulsing Banner */}
+      <div className={`mb-6 text-center transition-opacity duration-1000 ${showCopyright ? 'opacity-100' : 'opacity-40'}`}>
+        <div className="inline-block bg-amber-500/10 border border-amber-500/30 text-amber-400 px-6 py-2 rounded-2xl text-xs md:text-sm font-bold shadow-lg shadow-amber-500/10 backdrop-blur-md">
+          ✨ هذه اللعبة من برمجة وتطوير المطور محمد الحزمي - جميع الحقوق محفوظة 2026 ✨
+        </div>
+      </div>
+
       {/* Hero Banner with Generated AI Image */}
       <div className="relative overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl mb-10 text-right">
         {/* Background Banner Image */}
@@ -36,13 +53,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           <div className="max-w-xl">
             <div className="inline-flex items-center gap-2 bg-red-500/20 border border-red-500/40 text-red-300 px-3.5 py-1.5 rounded-full text-xs font-bold mb-4 shadow-sm backdrop-blur-md">
               <Sparkles className="w-4 h-4" />
-              <span>نظام الطقس المتغير وجرافكس 3D واقعي</span>
+              <span>10 سيارات فخمة ونظام جزيئات الدخان 3D</span>
             </div>
             <h2 className="text-3xl md:text-5xl font-black text-white mb-4 leading-tight drop-shadow-md">
               سباق سيارات التحكم عن بعد <span className="bg-gradient-to-r from-red-400 via-amber-300 to-yellow-300 bg-clip-text text-transparent">REMOCAR</span>
             </h2>
             <p className="text-slate-200 text-base md:text-lg mb-6 leading-relaxed drop-shadow">
-              انطلق بأقصى سرعة في حلبات ثلاثية الأبعاد مذهلة مع منافسين أشرس، ظروف طقس متغيرة (مشمش، ممطر، وضبابي)، وإعادة السباق!
+              انطلق بأقصى سرعة في حلبات ثلاثية الأبعاد مذهلة مع 10 سيارات عالمية فخمة، زوايا كاميرا متعددة، ونظام دخان الإطارات أثناء الانجراف!
             </p>
             <div className="flex flex-wrap items-center gap-4">
               <button
@@ -143,8 +160,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           <div className="w-12 h-12 rounded-2xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4 group-hover:scale-110 transition-transform">
             <Wrench className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-white mb-2">المرآب والتطوير</h3>
-          <p className="text-sm text-slate-400">افتح سيارات 3D جديدة وطور المحرك والنيترو.</p>
+          <h3 className="text-lg font-bold text-white mb-2">المرآب (10 سيارات)</h3>
+          <p className="text-sm text-slate-400">افتح 10 سيارات عالمية فخمة وطور محركها.</p>
         </div>
 
         <div 
@@ -166,7 +183,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <Gamepad2 className="w-6 h-6" />
           </div>
           <h3 className="text-lg font-bold text-white mb-2">طريقة اللعب والتحكم</h3>
-          <p className="text-sm text-slate-400">تعرف على مفاتيح لوحة المفاتيح والنيترو.</p>
+          <p className="text-sm text-slate-400">تعرف على مفاتيح لوحة المفاتيح والنيترو وزوايا الكاميرا.</p>
         </div>
       </div>
     </div>

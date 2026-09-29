@@ -11,6 +11,7 @@ import { InstructionsModal } from './components/InstructionsModal';
 import { DailyRewardModal } from './components/DailyRewardModal';
 import { MissionsPanel } from './components/MissionsPanel';
 import { NotificationToast } from './components/NotificationToast';
+import { SplashIntro } from './components/SplashIntro';
 import { soundManager } from './audio';
 
 interface Mission {
@@ -21,14 +22,15 @@ interface Mission {
 }
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState<boolean>(true);
   const [screen, setScreen] = useState<'menu' | 'garage' | 'tracks' | 'game' | 'replay'>('menu');
   const [coins, setCoins] = useState<number>(() => {
     const saved = localStorage.getItem('remocar_coins');
-    return saved ? parseInt(saved, 10) : 350;
+    return saved ? parseInt(saved, 10) : 500;
   });
   const [trophies, setTrophies] = useState<number>(() => {
     const saved = localStorage.getItem('remocar_trophies');
-    return saved ? parseInt(saved, 10) : 2;
+    return saved ? parseInt(saved, 10) : 3;
   });
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
@@ -59,9 +61,9 @@ export default function App() {
   });
 
   const [missions, setMissions] = useState<Mission[]>([
-    { id: 'm1', title: 'إكمال سباق واحد في حلبة 3D', reward: 150, completed: false },
-    { id: 'm2', title: 'جمع 50 عملة ذهبية أثناء السباق', reward: 200, completed: false },
-    { id: 'm3', title: 'ترقية أجزاء السيارة في المرآب', reward: 250, completed: false },
+    { id: 'm1', title: 'إكمال سباق 3D بنجاح', reward: 150, completed: false },
+    { id: 'm2', title: 'جمع العملات الذهبية في الحلبة', reward: 200, completed: false },
+    { id: 'm3', title: 'شراء أو ترقية إحدى السيارات العشر', reward: 300, completed: false },
   ]);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -141,6 +143,10 @@ export default function App() {
     setToastMessage(`أنهيت السباق وكسبت +${coinsEarned} عملة وتم حفظ إعادة السباق!`);
     setScreen('menu');
   };
+
+  if (showSplash) {
+    return <SplashIntro onEnterGame={() => setShowSplash(false)} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-red-500 selection:text-white pb-12">

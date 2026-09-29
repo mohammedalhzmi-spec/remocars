@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Car, Track, ReplayFrame } from '../types';
 import { soundManager } from '../audio';
-import { Trophy, Coins, Flag, ArrowRight, Zap, Flame, Thermometer, Compass, CloudRain, Sun, CloudFog } from 'lucide-react';
+import { Trophy, Coins, Flag, ArrowRight, Zap, Thermometer, Compass, CloudRain, Sun, CloudFog, Camera } from 'lucide-react';
 
 interface GameCanvasProps {
   car: Car;
@@ -23,6 +23,16 @@ interface AICar {
   maxSpeed: number;
 }
 
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  alpha: number;
+  color: string;
+}
+
 export const GameCanvas: React.FC<GameCanvasProps> = ({
   car,
   track,
@@ -38,9 +48,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [coinsCollected, setCoinsCollected] = useState<number>(0);
   const [raceTime, setRaceTime] = useState<number>(0);
   const [currentSpeed, setCurrentSpeed] = useState<number>(0);
-  const [engineTemp, setEngineTemp] = useState<number>(45); // Engine temp (Celsius)
+  const [engineTemp, setEngineTemp] = useState<number>(45);
   const [nitroActive, setNitroActive] = useState<boolean>(false);
   const [nitroCharge, setNitroCharge] = useState<number>(100);
+
+  // Camera Mode: 'chase' | 'bumper' | 'topdown'
+  const [cameraMode, setCameraMode] = useState<'chase' | 'bumper' | 'topdown'>('chase');
 
   // Weather state
   const [weather, setWeather] = useState<'sunny' | 'rainy' | 'foggy'>(() => {
@@ -51,6 +64,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   // Replay recording
   const recordedFramesRef = useRef<ReplayFrame[]>([]);
   const replayIndexRef = useRef<number>(0);
+
+  // Particles ref (tire smoke & dust)
+  const particlesRef = useRef<Particle[]>([]);
 
   // Controls state
   const keysRef = useRef<{ [key: string]: boolean }>({});
@@ -64,20 +80,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     vy: 0,
     angle: -Math.PI / 2,
     speed: 0,
-    maxSpeed: (8 + (car.speed / 15)) * (weather === 'rainy' ? 0.88 : 1),
-    acceleration: 0.2 + (car.acceleration / 350),
-    handling: 0.05 + (car.handling / 600),
+    maxSpeed: (8.5 + (car.speed / 14)) * (weather === 'rainy' ? 0.88 : 1),
+    acceleration: 0.22 + (car.acceleration / 300),
+    handling: 0.055 + (car.handling / 550),
     friction: slipFactor,
   });
 
   // 6 3D AI Competitors
   const aiCarsRef = useRef<AICar[]>([
-    { x: 440, y: 530, angle: -Math.PI / 2, speed: 5.8, color: '#3b82f6', lap: 1, checkpoint: 0, maxSpeed: 6.8 },
-    { x: 480, y: 560, angle: -Math.PI / 2, speed: 5.5, color: '#10b981', lap: 1, checkpoint: 0, maxSpeed: 6.6 },
-    { x: 520, y: 590, angle: -Math.PI / 2, speed: 6.0, color: '#f59e0b', lap: 1, checkpoint: 0, maxSpeed: 7.0 },
-    { x: 560, y: 620, angle: -Math.PI / 2, speed: 5.2, color: '#ec4899', lap: 1, checkpoint: 0, maxSpeed: 6.4 },
-    { x: 600, y: 650, angle: -Math.PI / 2, speed: 5.7, color: '#8b5cf6', lap: 1, checkpoint: 0, maxSpeed: 6.9 },
-    { x: 640, y: 680, angle: -Math.PI / 2, speed: 5.4, color: '#06b6d4', lap: 1, checkpoint: 0, maxSpeed: 6.5 },
+    { x: 440, y: 530, angle: -Math.PI / 2, speed: 6.0, color: '#3b82f6', lap: 1, checkpoint: 0, maxSpeed: 7.2 },
+    { x: 480, y: 560, angle: -Math.PI / 2, speed: 5.7, color: '#10b981', lap: 1, checkpoint: 0, maxSpeed: 7.0 },
+    { x: 520, y: 590, angle: -Math.PI / 2, speed: 6.2, color: '#f59e0b', lap: 1, checkpoint: 0, maxSpeed: 7.4 },
+    { x: 560, y: 620, angle: -Math.PI / 2, speed: 5.4, color: '#ec4899', lap: 1, checkpoint: 0, maxSpeed: 6.8 },
+    { x: 600, y: 650, angle: -Math.PI / 2, speed: 5.9, color: '#8b5cf6', lap: 1, checkpoint: 0, maxSpeed: 7.3 },
+    { x: 640, y: 680, angle: -Math.PI / 2, speed: 5.6, color: '#06b6d4', lap: 1, checkpoint: 0, maxSpeed: 7.1 },
   ]);
 
   // Raindrops particles
@@ -99,7 +115,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     { x: 1500, y: 800, collected: false },
   ]);
 
-  // Track waypoints for circuit loop
   const waypoints = [
     { x: 400, y: 500 },
     { x: 1000, y: 300 },
@@ -123,24 +138,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     }
   }, [gameState, countdownNum, isReplayMode]);
 
-  // Race timer & engine temperature simulation
+  // Race timer & engine temp
   useEffect(() => {
     if (gameState !== 'racing') return;
     const interval = setInterval(() => {
       setRaceTime((t) => t + 0.1);
       setNitroCharge((prev) => Math.min(100, prev + 0.5));
-      
-      // Update engine temperature based on nitro or high speed
       setEngineTemp((temp) => {
         if (nitroActive) return Math.min(115, temp + 1.2);
-        if (currentSpeed > 6) return Math.min(95, temp + 0.3);
+        if (currentSpeed > 60) return Math.min(95, temp + 0.3);
         return Math.max(45, temp - 0.5);
       });
     }, 100);
     return () => clearInterval(interval);
   }, [gameState, nitroActive, currentSpeed]);
 
-  // Keyboard listeners
+  // Keyboard listeners & Camera toggle ('C' key)
   useEffect(() => {
     if (isReplayMode) return;
 
@@ -154,6 +167,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           setTimeout(() => setNitroActive(false), 1600);
           setNitroCharge((c) => Math.max(0, c - 40));
         }
+      }
+      if (e.code === 'KeyC') {
+        // Toggle camera mode
+        setCameraMode((m) => (m === 'chase' ? 'bumper' : m === 'bumper' ? 'topdown' : 'chase'));
       }
     };
 
@@ -169,7 +186,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     };
   }, [nitroCharge, engineTemp, isReplayMode]);
 
-  // Main 3D Perspective Rendering Game Loop
+  // Main 3D Perspective Rendering Game Loop with Particle System
   useEffect(() => {
     let animationId: number;
     const canvas = canvasRef.current;
@@ -207,11 +224,34 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         if (keys['KeyA'] || keys['ArrowLeft']) {
           if (Math.abs(st.speed) > 0.3) {
             st.angle -= st.handling * (st.speed > 0 ? 1 : -1);
+            // Spawn tire smoke/drift particles when turning hard at speed
+            if (Math.abs(st.speed) > 3) {
+              particlesRef.current.push({
+                x: st.x - Math.cos(st.angle) * 20,
+                y: st.y - Math.sin(st.angle) * 20,
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                size: 8 + Math.random() * 8,
+                alpha: 0.7,
+                color: track.id === 'desert_rally' ? '#d97706' : '#cbd5e1',
+              });
+            }
           }
         }
         if (keys['KeyD'] || keys['ArrowRight']) {
           if (Math.abs(st.speed) > 0.3) {
             st.angle += st.handling * (st.speed > 0 ? 1 : -1);
+            if (Math.abs(st.speed) > 3) {
+              particlesRef.current.push({
+                x: st.x - Math.cos(st.angle) * 20,
+                y: st.y - Math.sin(st.angle) * 20,
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                size: 8 + Math.random() * 8,
+                alpha: 0.7,
+                color: track.id === 'desert_rally' ? '#d97706' : '#cbd5e1',
+              });
+            }
           }
         }
 
@@ -227,13 +267,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           speed: st.speed,
         });
 
-        // Track limits boundary collision
+        // Boundary checks
         if (st.x < 100 || st.x > 2400 || st.y < 100 || st.y > 2200) {
           st.speed *= -0.4;
           soundManager.playCrash();
         }
 
-        // Coins collection check
+        // Coins collection
         coinsRef.current.forEach((coin) => {
           if (!coin.collected) {
             const dist = Math.hypot(st.x - coin.x, st.y - coin.y);
@@ -245,7 +285,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           }
         });
 
-        // Update AI 3D Cars
+        // Update AI Cars
         aiCarsRef.current.forEach((ai) => {
           const target = waypoints[ai.checkpoint];
           const angleToTarget = Math.atan2(target.y - ai.y, target.x - ai.x);
@@ -271,36 +311,38 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         });
       }
 
-      // --- TRUE 3D PERSPECTIVE RENDERING ENGINE ---
+      // Update Smoke / Dust Particles
+      particlesRef.current.forEach((p) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.size += 0.4;
+        p.alpha -= 0.03;
+      });
+      particlesRef.current = particlesRef.current.filter((p) => p.alpha > 0);
+
+      // --- RENDERING 3D PERSPECTIVE WITH CAMERA MODES ---
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const st = carStateRef.current;
-      const cameraX = st.x;
-      const cameraY = st.y;
+      const cameraX = cameraMode === 'bumper' ? st.x + Math.cos(st.angle) * 30 : cameraMode === 'topdown' ? st.x : st.x;
+      const cameraY = cameraMode === 'bumper' ? st.y + Math.sin(st.angle) * 30 : cameraMode === 'topdown' ? st.y : st.y;
       const cameraAngle = st.angle;
+      const zoom = cameraMode === 'topdown' ? 0.6 : cameraMode === 'bumper' ? 1.4 : 1.0;
 
       ctx.save();
-      // Translate to screen center, rotate by negative camera angle for 3D cockpit perspective
-      ctx.translate(canvas.width / 2, canvas.height / 2 + 50);
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.scale(zoom, zoom);
       ctx.rotate(-cameraAngle - Math.PI / 2);
       ctx.translate(-cameraX, -cameraY);
 
-      // 3D Sky / Horizon background grid or ground
-      const groundGrad = ctx.createRadialGradient(cameraX, cameraY, 100, cameraX, cameraY, 1500);
-      if (weather === 'foggy') {
-        groundGrad.addColorStop(0, '#475569');
-        groundGrad.addColorStop(1, '#1e293b');
-      } else if (weather === 'rainy') {
-        groundGrad.addColorStop(0, '#0f172a');
-        groundGrad.addColorStop(1, '#020617');
-      } else {
-        groundGrad.addColorStop(0, '#1e293b');
-        groundGrad.addColorStop(1, '#090d16');
-      }
+      // Ground Background
+      const groundGrad = ctx.createRadialGradient(cameraX, cameraY, 100, cameraX, cameraY, 1800);
+      groundGrad.addColorStop(0, '#1e293b');
+      groundGrad.addColorStop(1, '#090d16');
       ctx.fillStyle = groundGrad;
-      ctx.fillRect(cameraX - 1500, cameraY - 1500, 3000, 3000);
+      ctx.fillRect(cameraX - 2000, cameraY - 2000, 4000, 4000);
 
-      // Draw 3D Track Circuit Road with curbs and barriers
+      // 3D Track Circuit Road
       ctx.strokeStyle = '#334155';
       ctx.lineWidth = 180;
       ctx.lineCap = 'round';
@@ -311,7 +353,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.closePath();
       ctx.stroke();
 
-      // Track Kerb stripes
+      // Kerb Stripes
       ctx.strokeStyle = '#dc2626';
       ctx.lineWidth = 190;
       ctx.setLineDash([30, 30]);
@@ -322,7 +364,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Road asphalt inner
+      // Asphalt Surface
       ctx.fillStyle = '#0b0f19';
       ctx.beginPath();
       ctx.moveTo(400, 500);
@@ -330,7 +372,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.closePath();
       ctx.fill();
 
-      // Start / Finish 3D Line
+      // Start/Finish Line
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 12;
       ctx.setLineDash([15, 15]);
@@ -340,7 +382,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Draw Coins 3D
+      // Draw Particles (Smoke / Dust)
+      particlesRef.current.forEach((p) => {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, p.alpha);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+
+      // Draw Coins
       coinsRef.current.forEach((coin) => {
         if (!coin.collected) {
           ctx.save();
@@ -361,19 +414,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       });
 
-      // Draw 3D AI Competitor Cars with volumetric shadows and lighting
+      // Draw AI Cars
       aiCarsRef.current.forEach((ai) => {
         ctx.save();
         ctx.translate(ai.x, ai.y);
         ctx.rotate(ai.angle);
 
-        // Volumetric 3D Shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
         ctx.beginPath();
         ctx.ellipse(0, 5, 26, 14, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // 3D Car Chassis
         ctx.fillStyle = ai.color;
         ctx.beginPath();
         ctx.roundRect(-28, -14, 56, 28, [10]);
@@ -382,69 +433,57 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // 3D Cabin & Windshield
         ctx.fillStyle = '#1e293b';
         ctx.fillRect(-10, -11, 20, 22);
-
-        // Spoiler
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(-30, -17, 6, 34);
 
         ctx.restore();
       });
 
-      // Draw Player's True 3D Car Model with Headlights & Shading
-      ctx.save();
-      ctx.translate(st.x, st.y);
-      ctx.rotate(st.angle);
+      // Draw Player Car (unless bumper mode)
+      if (cameraMode !== 'bumper') {
+        ctx.save();
+        ctx.translate(st.x, st.y);
+        ctx.rotate(st.angle);
 
-      // Volumetric 3D Shadow
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.beginPath();
-      ctx.ellipse(0, 6, 30, 16, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Nitro flame 3D effect
-      if (nitroActive) {
-        ctx.fillStyle = '#f97316';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.beginPath();
-        ctx.moveTo(-32, -10);
-        ctx.lineTo(-58, 0);
-        ctx.lineTo(-32, 10);
-        ctx.closePath();
+        ctx.ellipse(0, 6, 30, 16, 0, 0, Math.PI * 2);
         ctx.fill();
+
+        if (nitroActive) {
+          ctx.fillStyle = '#f97316';
+          ctx.beginPath();
+          ctx.moveTo(-32, -10);
+          ctx.lineTo(-58, 0);
+          ctx.lineTo(-32, 10);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        ctx.fillStyle = car.color;
+        ctx.beginPath();
+        ctx.roundRect(-30, -16, 60, 32, [12]);
+        ctx.fill();
+        ctx.strokeStyle = '#f8fafc';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = car.secondaryColor;
+        ctx.fillRect(-12, -12, 24, 24);
+
+        ctx.fillStyle = '#fef08a';
+        ctx.shadowColor = '#fef08a';
+        ctx.shadowBlur = 15;
+        ctx.fillRect(26, -13, 6, 8);
+        ctx.fillRect(26, 5, 6, 8);
+        ctx.shadowBlur = 0;
+
+        ctx.restore();
       }
-
-      // 3D Car Body (Metallic gradient)
-      ctx.fillStyle = car.color;
-      ctx.beginPath();
-      ctx.roundRect(-30, -16, 60, 32, [12]);
-      ctx.fill();
-      ctx.strokeStyle = '#f8fafc';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Cabin / Cockpit
-      ctx.fillStyle = car.secondaryColor;
-      ctx.fillRect(-12, -12, 24, 24);
-
-      // Glowing 3D Headlights
-      ctx.fillStyle = '#fef08a';
-      ctx.shadowColor = '#fef08a';
-      ctx.shadowBlur = 15;
-      ctx.fillRect(26, -13, 6, 8);
-      ctx.fillRect(26, 5, 6, 8);
-      ctx.shadowBlur = 0;
-
-      // Rear Spoiler
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(-32, -19, 8, 38);
 
       ctx.restore();
 
-      ctx.restore(); // Restore camera matrix
-
-      // 3D Weather overlay (Rain / Fog)
+      // Weather Raindrops
       if (weather === 'rainy') {
         ctx.strokeStyle = 'rgba(186, 230, 253, 0.7)';
         ctx.lineWidth = 2;
@@ -456,9 +495,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           drop.y += drop.speed;
           if (drop.y > canvas.height) drop.y = -20;
         });
-      } else if (weather === 'foggy') {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
 
       animationId = requestAnimationFrame(updateGame);
@@ -466,7 +502,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     animationId = requestAnimationFrame(updateGame);
     return () => cancelAnimationFrame(animationId);
-  }, [gameState, nitroActive, car, track, weather, isReplayMode, replayFrames]);
+  }, [gameState, nitroActive, car, track, weather, isReplayMode, replayFrames, cameraMode]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 animate-fadeIn text-right">
@@ -489,6 +525,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         </div>
 
         <div className="flex items-center gap-4">
+          {/* Camera Toggle Button */}
+          <button
+            onClick={() => setCameraMode((m) => (m === 'chase' ? 'bumper' : m === 'bumper' ? 'topdown' : 'chase'))}
+            className="flex items-center gap-2 bg-indigo-600/30 border border-indigo-500/50 hover:bg-indigo-600/50 text-indigo-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
+            title="تغيير زاوية الكاميرا [مفتاح C]"
+          >
+            <Camera className="w-4 h-4" />
+            <span>الكاميرا: {cameraMode === 'chase' ? 'خلف السيارة' : cameraMode === 'bumper' ? 'من المصد' : 'علوية'}</span>
+          </button>
+
           {!isReplayMode && (
             <div className="flex items-center gap-2">
               <Zap className={`w-5 h-5 ${nitroCharge > 20 ? 'text-amber-400 animate-bounce' : 'text-slate-600'}`} />
@@ -511,7 +557,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         </div>
       </div>
 
-      {/* Canvas Arena with Dynamic 3D HUD (Speedometer, Engine Temp, Mini-map) */}
+      {/* Canvas Arena */}
       <div className="relative rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950 flex justify-center">
         <canvas
           ref={canvasRef}
@@ -520,9 +566,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           className="w-full max-w-full h-auto aspect-[16/10] block"
         />
 
-        {/* --- DYNAMIC HUD OVERLAYS --- */}
-
-        {/* 1. Real-time Speedometer (Bottom Left) */}
+        {/* HUD Overlays: Speedometer, Engine Temp, Mini-map */}
         <div className="absolute bottom-6 left-6 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-3xl shadow-2xl flex items-center gap-4 text-white">
           <div className="relative w-20 h-20 rounded-full bg-slate-950 border-4 border-slate-800 flex flex-col items-center justify-center shadow-inner">
             <span className="text-2xl font-black text-red-500">{currentSpeed}</span>
@@ -539,7 +583,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           </div>
         </div>
 
-        {/* 2. Engine Temperature Gauge (Bottom Center-Left) */}
         <div className="absolute bottom-6 left-52 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-3xl shadow-2xl flex items-center gap-3 text-white">
           <Thermometer className={`w-6 h-6 ${engineTemp > 95 ? 'text-red-500 animate-bounce' : 'text-amber-400'}`} />
           <div>
@@ -548,47 +591,39 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           </div>
         </div>
 
-        {/* 3. Mini-map (Top Right) */}
         <div className="absolute top-6 right-6 w-36 h-36 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-3xl shadow-2xl overflow-hidden p-2 flex flex-col items-center justify-center relative">
           <div className="absolute top-2 right-3 text-[10px] text-slate-400 font-bold flex items-center gap-1">
             <Compass className="w-3 h-3 text-red-500" />
             <span>الخريطة المصغرة</span>
           </div>
-          {/* Mini-map track representation */}
           <div className="w-28 h-24 border-2 border-dashed border-slate-700 rounded-2xl relative flex items-center justify-center">
-            {/* Player dot */}
             <div className="absolute w-3 h-3 bg-red-500 rounded-full shadow-lg animate-ping" />
             <div className="absolute w-2.5 h-2.5 bg-red-500 rounded-full shadow-lg" />
-            {/* AI dots */}
-            <div className="absolute top-6 left-6 w-2 h-2 bg-blue-500 rounded-full" />
-            <div className="absolute bottom-6 right-8 w-2 h-2 bg-emerald-500 rounded-full" />
           </div>
         </div>
 
-        {/* Countdown overlay */}
         {gameState === 'countdown' && !isReplayMode && (
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn">
             <span className="text-8xl font-black text-red-500 mb-4 animate-bounce">
               {countdownNum > 0 ? countdownNum : 'انطلق!'}
             </span>
-            <p className="text-slate-300 text-lg font-bold">استعد لسباق الريموت 3D الكامل...</p>
+            <p className="text-slate-300 text-lg font-bold">معزز بنظام جزيئات الدخان والتحكم بالكاميرا...</p>
           </div>
         )}
 
-        {/* Finished overlay */}
         {gameState === 'finished' && (
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn p-6 text-center">
             <div className="w-20 h-20 rounded-3xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-4xl mb-6 shadow-xl">
               <Trophy className="w-10 h-10" />
             </div>
-            <h2 className="text-4xl font-black text-white mb-2">أهلاً بك على منصة التتويج 3D!</h2>
+            <h2 className="text-4xl font-black text-white mb-2">أهلاً بك على منصة التتويج!</h2>
             <p className="text-slate-400 text-sm mb-6">
-              التوقيت الإجمالي: <span className="text-white font-bold">{raceTime.toFixed(1)} ثانية</span> | العملات المكتسبة: <span className="text-amber-400 font-bold">+{coinsCollected + 120}</span>
+              التوقيت الإجمالي: <span className="text-white font-bold">{raceTime.toFixed(1)} ثانية</span> | العملات المكتسبة: <span className="text-amber-400 font-bold">+{coinsCollected + 150}</span>
             </p>
 
             <div className="flex items-center gap-4">
               <button
-                onClick={() => onFinishRace(true, coinsCollected + 120, recordedFramesRef.current)}
+                onClick={() => onFinishRace(true, coinsCollected + 150, recordedFramesRef.current)}
                 className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-bold px-8 py-3.5 rounded-2xl shadow-lg shadow-red-600/30 transition-all text-base"
               >
                 <span>حفظ النتيجة ومشاهدة الإعادة</span>
