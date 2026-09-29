@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { User, Award, Shield, Sparkles, X, Check } from 'lucide-react';
+import { User, Award, Sparkles, X, Check, Star, Coins } from 'lucide-react';
 import { PlayerProfile } from '../types';
 import { soundManager } from '../audio';
+import { getLevelBenefits, getLevelReward, getLevelTitle, getNextMilestone } from '../data/progression';
 
 interface PlayerProfileModalProps {
   isOpen: boolean;
   profile: PlayerProfile;
+  stars: number;
   onUpdateProfile: (name: string) => void;
   onClose: () => void;
 }
@@ -13,6 +15,7 @@ interface PlayerProfileModalProps {
 export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
   isOpen,
   profile,
+  stars,
   onUpdateProfile,
   onClose,
 }) => {
@@ -32,12 +35,10 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
     }
   };
 
-  const getPerksForLevel = (lvl: number) => {
-    if (lvl >= 5) return 'سرعة قصوى +20% | نيترو لا ينفد بسرعة | أرباح مضاعفة x3';
-    if (lvl >= 3) return 'سرعة قصوى +10% | تحكم احترافي في المنعطفات';
-    if (lvl >= 2) return 'نيترو إضافي +15%';
-    return 'المستوى الأساسي للمتسابقيين';
-  };
+  const benefits = getLevelBenefits(profile.level);
+  const xpInCurrentLevel = Math.max(0, profile.xp - (profile.level - 1) * 500);
+  const nextLevelReward = getLevelReward(profile.level + 1);
+  const nextMilestone = getNextMilestone(profile.level);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn text-right">
@@ -64,15 +65,18 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
           <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 text-center">
             <div className="inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-400 px-3.5 py-1 rounded-full text-xs font-bold mb-2">
               <Award className="w-4 h-4" />
-              <span>{profile.title} (المستوى {profile.level})</span>
+              <span>{getLevelTitle(profile.level)} (المستوى {profile.level})</span>
             </div>
             <div className="text-2xl font-black text-white mb-1">{profile.name}</div>
-            <p className="text-xs text-slate-400 mb-3">خبرة اللعب (XP): {profile.xp} / {profile.level * 500}</p>
+            <div className="mb-3 flex items-center justify-between text-xs text-slate-400">
+              <span>خبرة هذا المستوى: {xpInCurrentLevel} / 500 XP</span>
+              <span className="inline-flex items-center gap-1 font-bold text-amber-300"><Star className="h-4 w-4 fill-current" />{stars}</span>
+            </div>
 
             <div className="w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-700">
               <div 
                 className="h-full bg-gradient-to-r from-amber-500 to-red-500 rounded-full"
-                style={{ width: `${Math.min(100, (profile.xp / (profile.level * 500)) * 100)}%` }}
+                style={{ width: `${Math.min(100, (xpInCurrentLevel / 500) * 100)}%` }}
               />
             </div>
           </div>
@@ -96,8 +100,12 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
               <span>ميزات المستوى الحالي الحصرية:</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              {getPerksForLevel(profile.level)}
+              السرعة القصوى +{benefits.speedBonusPct.toFixed(1)}% · التسارع +{benefits.accelerationBonusPct.toFixed(1)}% · التوجيه +{benefits.handlingBonusPct.toFixed(1)}% · سعة النيترو {benefits.nitroCapacity}% · مكافآت السباق ×{benefits.coinMultiplier.toFixed(2)}
             </p>
+          </div>
+          <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4 text-xs text-slate-300">
+            <div className="mb-2 flex items-center gap-2 font-bold text-amber-300"><Coins className="h-4 w-4" />جائزة المستوى التالي: +{nextLevelReward.coins} عملة ونجمة جديدة</div>
+            <p>{nextMilestone ? `مكافأة المستوى ${nextMilestone.level}: ${nextMilestone.description}` : 'واصل السباق لزيادة السرعة ومكافآت العملات.'}</p>
           </div>
         </div>
 

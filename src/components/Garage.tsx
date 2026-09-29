@@ -8,6 +8,7 @@ interface GarageProps {
   cars: Car[];
   selectedCar: Car;
   coins: number;
+  playerLevel: number;
   upgrades: Upgrade[];
   onSelectCar: (car: Car) => void;
   onBuyCar: (car: Car) => void;
@@ -19,6 +20,7 @@ export const Garage: React.FC<GarageProps> = ({
   cars,
   selectedCar,
   coins,
+  playerLevel,
   upgrades,
   onSelectCar,
   onBuyCar,
@@ -70,7 +72,7 @@ export const Garage: React.FC<GarageProps> = ({
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
           <h2 className="text-3xl font-black text-white mb-2">مرآب السيارات والتطوير</h2>
-          <p className="text-slate-400 text-sm">اختر سيارتك المفضلة أو قم بترقية قطع الغيار لمضاعفة فرص الفوز.</p>
+          <p className="text-slate-400 text-sm">اختر سيارتك المفضلة أو قم بترقية قطع الغيار لمضاعفة فرص الفوز. مستواك الحالي: {playerLevel}</p>
         </div>
 
         {/* Tabs */}
@@ -162,7 +164,8 @@ export const Garage: React.FC<GarageProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {cars.map((car) => {
             const isSelected = selectedCar.id === car.id;
-            const canBuy = coins >= car.price;
+            const meetsLevel = playerLevel >= (car.requiredLevel ?? 1);
+            const canBuy = coins >= car.price && meetsLevel;
 
             return (
               <div
@@ -250,7 +253,7 @@ export const Garage: React.FC<GarageProps> = ({
                       }`}
                     >
                       <ShoppingBag className="w-4 h-4" />
-                      <span>شراء مقابل {car.price} عملة</span>
+                      <span>{!meetsLevel ? `تُفتح عند المستوى ${car.requiredLevel}` : car.price === 0 ? 'استلام مجاني' : `شراء مقابل ${car.price} عملة`}</span>
                     </button>
                   )}
                 </div>

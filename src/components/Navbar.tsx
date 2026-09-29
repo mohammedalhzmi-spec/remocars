@@ -1,10 +1,12 @@
 import React from 'react';
-import { Volume2, VolumeX, Trophy, Coins, Github, Wrench, Flag, Home, User, Medal } from 'lucide-react';
+import { Volume2, VolumeX, Trophy, Coins, Github, Wrench, Flag, Home, User, Medal, Star } from 'lucide-react';
 import gameIcon from '../assets/images/remocar_game_icon.webp';
 
 interface NavbarProps {
   coins: number;
   trophies: number;
+  profileLevel: number;
+  carCount: number;
   soundEnabled: boolean;
   onToggleSound: () => void;
   onNavigate: (screen: 'menu' | 'garage' | 'tracks') => void;
@@ -17,6 +19,8 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   coins,
   trophies,
+  profileLevel,
+  carCount,
   soundEnabled,
   onToggleSound,
   onNavigate,
@@ -77,7 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             <Wrench className="w-4 h-4" />
-            المرآب (10 سيارات)
+            المرآب ({carCount} سيارات)
           </button>
         </div>
 
@@ -90,7 +94,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             title="ملف المتسابق"
           >
             <User className="w-4 h-4 text-amber-400" />
-            <span className="hidden sm:inline">الملف</span>
+            <span className="hidden sm:inline">المستوى {profileLevel}</span>
           </button>
 
           {/* Leaderboard Button */}
@@ -107,6 +111,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-full text-amber-400 font-bold text-sm">
             <Coins className="w-4 h-4 text-amber-400" />
             <span>{coins}</span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-yellow-500/10 border border-yellow-500/30 px-3 py-1.5 rounded-full text-yellow-300 font-bold text-sm" aria-label={`${trophies} نجمة`}>
+            <Star className="w-4 h-4 fill-current" />
+            <span>{trophies}</span>
           </div>
 
           {/* Sound Toggle */}

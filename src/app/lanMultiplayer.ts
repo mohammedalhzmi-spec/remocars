@@ -5,6 +5,33 @@ export interface LanPlayer {
   color: string;
 }
 
+export interface LanRoundFinish {
+  playerId: string;
+  name: string;
+  time: number;
+  place: number;
+  pointsEarned: number;
+}
+
+export interface LanStanding {
+  playerId: string;
+  name: string;
+  carName: string;
+  points: number;
+  totalTime: number;
+}
+
+export interface LanTournamentResult {
+  type: 'round_complete' | 'match_complete';
+  roomCode: string;
+  trackId: string;
+  round: number;
+  roundsTotal: number;
+  finishOrder: LanRoundFinish[];
+  scores: LanStanding[];
+  winner?: LanStanding | null;
+}
+
 export type LanMessage = {
   type: string;
   [key: string]: unknown;
@@ -20,6 +47,8 @@ class LanMultiplayerClient {
   roomCode = '';
   isHost = false;
   trackId = '';
+  round = 1;
+  roundsTotal = 3;
 
   connect(rawAddress: string): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
@@ -52,6 +81,8 @@ class LanMultiplayerClient {
           if (typeof message.trackId === 'string') this.trackId = message.trackId;
           if (typeof message.hostId === 'string') this.isHost = message.hostId === this.playerId;
         }
+        if (typeof message.round === 'number' && Number.isFinite(message.round)) this.round = message.round;
+        if (typeof message.roundsTotal === 'number' && Number.isFinite(message.roundsTotal)) this.roundsTotal = message.roundsTotal;
         this.listeners.forEach((listener) => listener(message));
       };
       socket.onerror = () => {
@@ -76,6 +107,14 @@ class LanMultiplayerClient {
     return () => this.listeners.delete(listener);
   }
 
+  finishRound(time: number): boolean {
+    return this.send({ type: 'finish_round', time });
+  }
+
+  startNextRound(): boolean {
+    return this.send({ type: 'start_next_round' });
+  }
+
   close(resetRoom = true) {
     if (this.socket) {
       this.socket.onclose = null;
@@ -88,6 +127,8 @@ class LanMultiplayerClient {
       this.isHost = false;
       this.trackId = '';
       this.playerId = '';
+      this.round = 1;
+      this.roundsTotal = 3;
     }
   }
 }

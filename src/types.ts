@@ -11,6 +11,8 @@ export interface Car {
   unlocked: boolean;
   imageIcon: string;
   modelType: 'sport' | 'drift' | 'monster' | 'cyber';
+  requiredLevel?: number;
+  freeAtLevel?: number;
   customization?: CarCustomization;
 }
 
@@ -27,6 +29,7 @@ export interface Track {
   background: string;
   laps: number;
   unlocked: boolean;
+  requiredLevel?: number;
   recordTime?: number;
   isDriftMode?: boolean;
   isLongTrack?: boolean;

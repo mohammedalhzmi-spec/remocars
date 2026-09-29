@@ -18,33 +18,85 @@ const httpServer = createServer((request, response) => {
 });
 const wss = new WebSocketServer({ server: httpServer, maxPayload: 4096, perMessageDeflate: false });
 
+const POINTS_BY_PLACE = [25, 18, 15, 12, 10, 8];
 const cleanText = (value, max = 28) => String(value ?? '').replace(/[<>\u0000-\u001f]/g, '').trim().slice(0, max);
 const send = (socket, message) => {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 };
 const playerList = (room) => [...room.players.values()].map(({ id, name, carName, color }) => ({ id, name, carName, color }));
 function broadcast(room, message, omitId = '') {
-  for (const [id, player] of room.players) {
-    if (id !== omitId) send(player.socket, message);
-  }
+  for (const [id, player] of room.players) if (id !== omitId) send(player.socket, message);
+}
+function currentStandings(room) {
+  return [...room.players.values()].map((player) => {
+    const score = room.scores.get(player.id) ?? { points: 0, totalTime: 0 };
+    return { playerId: player.id, name: player.name, carName: player.carName, points: score.points, totalTime: Number(score.totalTime.toFixed(3)) };
+  }).sort((a, b) => b.points - a.points || a.totalTime - b.totalTime || a.name.localeCompare(b.name));
 }
 function broadcastRoomState(room) {
-  broadcast(room, { type: 'room_state', roomCode: room.code, trackId: room.trackId, hostId: room.hostId, raceStarted: room.raceStarted, players: playerList(room) });
+  broadcast(room, {
+    type: 'room_state', roomCode: room.code, trackId: room.trackId, hostId: room.hostId,
+    raceStarted: room.raceStarted, round: room.currentRound, roundsTotal: room.roundsTotal,
+    scores: currentStandings(room), players: playerList(room),
+  });
+}
+function completeRound(room) {
+  if (room.roundComplete || !room.raceStarted || room.roundResults.size < room.players.size || room.players.size === 0) return;
+  const finishOrder = [...room.roundResults.entries()]
+    .map(([playerId, result]) => ({ playerId, name: room.players.get(playerId)?.name ?? 'متسابق', time: result.time, finishedAt: result.finishedAt }))
+    .sort((a, b) => a.time - b.time || a.finishedAt - b.finishedAt)
+    .map((entry, index) => {
+      const points = POINTS_BY_PLACE[index] ?? 0;
+      const current = room.scores.get(entry.playerId) ?? { points: 0, totalTime: 0 };
+      current.points += points;
+      current.totalTime += entry.time;
+      room.scores.set(entry.playerId, current);
+      return { playerId: entry.playerId, name: entry.name, time: Number(entry.time.toFixed(3)), place: index + 1, pointsEarned: points };
+    });
+  room.raceStarted = false;
+  room.roundComplete = true;
+  const scores = currentStandings(room);
+  const common = { roomCode: room.code, trackId: room.trackId, round: room.currentRound, roundsTotal: room.roundsTotal, finishOrder, scores };
+  if (room.currentRound >= room.roundsTotal) {
+    room.matchComplete = true;
+    broadcast(room, { type: 'match_complete', ...common, winner: scores[0] ?? null });
+  } else {
+    broadcast(room, { type: 'round_complete', ...common });
+  }
+  broadcastRoomState(room);
+}
+function removePlayer(room, playerId) {
+  room.players.delete(playerId);
+  room.scores.delete(playerId);
+  room.roundResults.delete(playerId);
+  if (room.players.size === 0) {
+    rooms.delete(room.code);
+    return;
+  }
+  if (room.hostId === playerId) room.hostId = room.players.keys().next().value;
+  broadcastRoomState(room);
+  broadcast(room, { type: 'player_left', playerId });
+  completeRound(room);
 }
 function leaveRoom(socket) {
   const record = socketPlayers.get(socket);
   if (!record) return;
   const room = rooms.get(record.roomCode);
-  if (room) {
-    room.players.delete(record.playerId);
-    if (room.players.size === 0) rooms.delete(room.code);
-    else {
-      if (room.hostId === record.playerId) room.hostId = room.players.keys().next().value;
-      broadcastRoomState(room);
-      broadcast(room, { type: 'player_left', playerId: record.playerId });
-    }
-  }
+  if (room) removePlayer(room, record.playerId);
   socketPlayers.delete(socket);
+}
+function startNextRound(room) {
+  if (room.matchComplete || !room.roundComplete || room.raceStarted || room.currentRound >= room.roundsTotal) return false;
+  room.currentRound += 1;
+  room.roundResults.clear();
+  room.roundComplete = false;
+  room.raceStarted = true;
+  broadcast(room, {
+    type: 'race_start', roomCode: room.code, trackId: room.trackId,
+    round: room.currentRound, roundsTotal: room.roundsTotal, scores: currentStandings(room), players: playerList(room),
+  });
+  broadcastRoomState(room);
+  return true;
 }
 
 wss.on('connection', (socket) => {
@@ -64,10 +116,16 @@ wss.on('connection', (socket) => {
       let code;
       do { code = String(randomInt(100000, 1000000)); } while (rooms.has(code));
       const player = { id: playerId, name: cleanText(message.name) || 'المضيف', carName: cleanText(message.carName) || 'سيارة سباق', color: cleanText(message.color, 16) || '#ef4444', socket };
-      const room = { code, hostId: playerId, trackId: cleanText(message.trackId, 40) || 'coastal_highway', raceStarted: false, players: new Map([[playerId, player]]) };
+      const requestedRounds = Number(message.roundsTotal);
+      const room = {
+        code, hostId: playerId, trackId: cleanText(message.trackId, 40) || 'coastal_highway',
+        roundsTotal: Number.isInteger(requestedRounds) ? Math.max(1, Math.min(9, requestedRounds)) : 3,
+        currentRound: 1, raceStarted: false, roundComplete: false, matchStarted: false, matchComplete: false,
+        players: new Map([[playerId, player]]), scores: new Map([[playerId, { points: 0, totalTime: 0 }]]), roundResults: new Map(),
+      };
       rooms.set(code, room);
       socketPlayers.set(socket, { playerId, roomCode: code });
-      send(socket, { type: 'room_joined', roomCode: code, playerId, hostId: playerId, trackId: room.trackId, players: playerList(room) });
+      send(socket, { type: 'room_joined', roomCode: code, playerId, hostId: playerId, trackId: room.trackId, round: room.currentRound, roundsTotal: room.roundsTotal, scores: currentStandings(room), players: playerList(room) });
       return;
     }
 
@@ -76,13 +134,14 @@ wss.on('connection', (socket) => {
       const code = cleanText(message.roomCode, 6);
       const room = rooms.get(code);
       if (!room) return send(socket, { type: 'error', message: 'لم يتم العثور على الغرفة. تأكد من الرمز وأن المضيف على الشبكة نفسها.' });
-      if (room.raceStarted) return send(socket, { type: 'error', message: 'السباق بدأ بالفعل؛ أنشئ غرفة جديدة.' });
+      if (room.matchStarted || room.raceStarted) return send(socket, { type: 'error', message: 'بدأت البطولة بالفعل؛ لا يمكن الانضمام إلى منتصف الجولات.' });
       if (room.players.size >= 6) return send(socket, { type: 'error', message: 'الغرفة مكتملة (الحد الأقصى 6 لاعبين).' });
       const player = { id: playerId, name: cleanText(message.name) || 'متسابق', carName: cleanText(message.carName) || 'سيارة سباق', color: cleanText(message.color, 16) || '#38bdf8', socket };
       room.players.set(playerId, player);
+      room.scores.set(playerId, { points: 0, totalTime: 0 });
       socketPlayers.set(socket, { playerId, roomCode: code });
-      send(socket, { type: 'room_joined', roomCode: code, playerId, hostId: room.hostId, trackId: room.trackId, players: playerList(room) });
-      broadcastRoomState(room, playerId);
+      send(socket, { type: 'room_joined', roomCode: code, playerId, hostId: room.hostId, trackId: room.trackId, round: room.currentRound, roundsTotal: room.roundsTotal, scores: currentStandings(room), players: playerList(room) });
+      broadcastRoomState(room);
       broadcast(room, { type: 'player_joined', player: { id: player.id, name: player.name, carName: player.carName, color: player.color } }, playerId);
       return;
     }
@@ -94,10 +153,33 @@ wss.on('connection', (socket) => {
 
     if (kind === 'start_race') {
       if (room.hostId !== playerId) return send(socket, { type: 'error', message: 'المضيف فقط يمكنه بدء السباق.' });
+      if (room.matchStarted || room.matchComplete) return send(socket, { type: 'error', message: 'البطولة بدأت بالفعل.' });
+      if (room.players.size < 2) return send(socket, { type: 'error', message: 'يلزم لاعبان على الأقل لبدء البطولة.' });
       const trackId = cleanText(message.trackId, 40);
       if (trackId) room.trackId = trackId;
+      room.matchStarted = true;
+      room.currentRound = 1;
       room.raceStarted = true;
-      broadcast(room, { type: 'race_start', roomCode: room.code, trackId: room.trackId, players: playerList(room) });
+      room.roundComplete = false;
+      room.roundResults.clear();
+      broadcast(room, { type: 'race_start', roomCode: room.code, trackId: room.trackId, round: room.currentRound, roundsTotal: room.roundsTotal, scores: currentStandings(room), players: playerList(room) });
+      broadcastRoomState(room);
+      return;
+    }
+
+    if (kind === 'start_next_round') {
+      if (room.hostId !== playerId) return send(socket, { type: 'error', message: 'المضيف فقط يمكنه بدء الجولة التالية.' });
+      if (!startNextRound(room)) return send(socket, { type: 'error', message: 'لا يمكن بدء الجولة التالية الآن.' });
+      return;
+    }
+
+    if (kind === 'finish_round') {
+      if (!room.raceStarted || room.roundResults.has(playerId)) return;
+      const time = Number(message.time);
+      if (!Number.isFinite(time) || time < 0.1 || time > 36000) return send(socket, { type: 'error', message: 'زمن الجولة غير صالح.' });
+      room.roundResults.set(playerId, { time, finishedAt: Date.now() });
+      broadcast(room, { type: 'round_progress', round: room.currentRound, roundsTotal: room.roundsTotal, finishedCount: room.roundResults.size, playerCount: room.players.size, finishedPlayerId: playerId, finishedPlayerName: room.players.get(playerId)?.name ?? 'متسابق' });
+      completeRound(room);
       return;
     }
 

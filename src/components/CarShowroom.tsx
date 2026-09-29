@@ -89,11 +89,12 @@ export const CarShowroom: React.FC<CarShowroomProps> = ({ car }) => {
       cancelAnimationFrame(animationId);
       observer.disconnect();
       renderer.dispose();
+      scene.traverse((item) => { if (item.userData.remocarVehicleWrapper) item.userData.remocarDestroyed = true; });
       scene.traverse((item) => {
         if (item instanceof THREE.Mesh) {
-          item.geometry.dispose();
+          if (!item.userData.remocarSharedGeometry) item.geometry.dispose();
           (Array.isArray(item.material) ? item.material : [item.material]).forEach((material) => {
-            Object.values(material).forEach((value) => { if (value instanceof THREE.Texture) value.dispose(); });
+            if (!material.userData.remocarSharedTextures) Object.values(material).forEach((value) => { if (value instanceof THREE.Texture) value.dispose(); });
             material.dispose();
           });
         }

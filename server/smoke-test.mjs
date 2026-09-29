@@ -44,9 +44,10 @@ try {
   guest = await connect();
 
   const hostRoom = waitFor(host, 'room_joined');
-  host.send(JSON.stringify({ type: 'create_room', name: 'Host', carName: 'Sport', color: '#ef4444', trackId: 'mp_desert_canyon' }));
+  host.send(JSON.stringify({ type: 'create_room', name: 'Host', carName: 'Sport', color: '#ef4444', trackId: 'mp_desert_canyon', roundsTotal: 3 }));
   const created = await hostRoom;
   assert.equal(created.roomCode.length, 6);
+  assert.equal(created.roundsTotal, 3);
 
   const hostState = waitFor(host, 'room_state');
   const guestRoom = waitFor(guest, 'room_joined');
@@ -67,7 +68,41 @@ try {
   const state = await remoteState;
   assert.equal(state.x, 12.5);
   assert.equal(state.playerId, created.playerId);
-  console.log('LAN multiplayer smoke test passed: create, join, shared start, and vehicle state sync.');
+
+  async function submitRound(hostTime, guestTime, expectedType) {
+    const hostResult = waitFor(host, expectedType);
+    const guestResult = waitFor(guest, expectedType);
+    host.send(JSON.stringify({ type: 'finish_round', time: hostTime }));
+    guest.send(JSON.stringify({ type: 'finish_round', time: guestTime }));
+    const [hostMessage, guestMessage] = await Promise.all([hostResult, guestResult]);
+    assert.equal(hostMessage.round, guestMessage.round);
+    assert.equal(hostMessage.finishOrder.length, 2);
+    assert.equal(hostMessage.finishOrder[0].time, Math.min(hostTime, guestTime));
+    return hostMessage;
+  }
+
+  let result = await submitRound(60, 70, 'round_complete');
+  assert.equal(result.round, 1);
+  assert.equal(result.finishOrder[0].playerId, created.playerId);
+  assert.equal(result.finishOrder[0].pointsEarned, 25);
+  assert.equal(result.finishOrder[1].pointsEarned, 18);
+
+  for (const [round, hostTime, guestTime] of [[2, 70, 60], [3, 50, 55]]) {
+    const hostNext = waitFor(host, 'race_start');
+    const guestNext = waitFor(guest, 'race_start');
+    host.send(JSON.stringify({ type: 'start_next_round' }));
+    const [hostRace, guestRace] = await Promise.all([hostNext, guestNext]);
+    assert.equal(hostRace.round, round);
+    assert.equal(guestRace.round, round);
+    const expectedType = round === 3 ? 'match_complete' : 'round_complete';
+    result = await submitRound(hostTime, guestTime, expectedType);
+  }
+
+  assert.equal(result.round, 3);
+  assert.equal(result.winner.playerId, created.playerId);
+  assert.equal(result.scores[0].points, 68);
+  assert.equal(result.scores[1].points, 61);
+  console.log('LAN multiplayer smoke test passed: room creation, join, state sync, three rounds, scoring, next-round control and championship winner.');
 } finally {
   host?.close();
   guest?.close();

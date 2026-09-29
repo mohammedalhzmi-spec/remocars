@@ -2,8 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Car, Track, ReplayFrame, LeaderboardEntry, PlayerProfile, Upgrade } from '../types';
 import { getTrackLayout } from '../data/trackLayouts';
-import { lanMultiplayer } from '../app/lanMultiplayer';
+import { getLevelBenefits } from '../data/progression';
+import { RaceCoach } from '../data/raceCoaches';
+import { lanMultiplayer, LanTournamentResult } from '../app/lanMultiplayer';
 import { makeVehicle as makeVehicleModel } from '../app/vehicleModel';
+import { createCoastalWater, createSkyDome, createSurfaceTexture, createTerrainMesh } from '../app/trackEnvironment';
 import { soundManager } from '../audio';
 import { Trophy, Coins, Flag, ArrowRight, Zap, Thermometer, Camera, Flame, Pause, Play, RotateCcw } from 'lucide-react';
 
@@ -15,8 +18,19 @@ interface GameCanvasProps {
   leaderboardEntry?: LeaderboardEntry;
   isReplayMode?: boolean;
   isMultiplayerRoom?: boolean;
+  multiplayerRound?: number;
+  multiplayerRoundsTotal?: number;
+  multiplayerResult?: LanTournamentResult | null;
+  multiplayerFinishedCount?: number;
+  multiplayerPlayerCount?: number;
+  multiplayerDidSubmit?: boolean;
+  multiplayerIsHost?: boolean;
+  coach: RaceCoach;
   replayFrames?: ReplayFrame[];
   onFinishRace: (won: boolean, coinsEarned: number, frames: ReplayFrame[], lapTime: number) => void;
+  onFinishMultiplayerRound?: (lapTime: number) => void;
+  onStartNextMultiplayerRound?: () => void;
+  onExitMultiplayer?: () => void;
   onQuit: () => void;
 }
 
@@ -117,41 +131,15 @@ function createRibbon(curve: THREE.CatmullRomCurve3, width: number, segments: nu
   return geometry;
 }
 
-function createAsphaltTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const context = canvas.getContext('2d');
-  if (!context) return new THREE.CanvasTexture(canvas);
-  context.fillStyle = '#73777a';
-  context.fillRect(0, 0, 256, 256);
-  let seed = 37;
-  const random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  for (let i = 0; i < 12500; i++) {
-    const shade = Math.floor(56 + random() * 118);
-    const alpha = 0.06 + random() * 0.19;
-    context.fillStyle = `rgba(${shade}, ${shade}, ${shade}, ${alpha})`;
-    const size = 0.4 + random() * 1.8;
-    context.fillRect(random() * 256, random() * 256, size, size);
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.anisotropy = 4;
-  return texture;
-}
-
-function closestProgress(curve: THREE.CatmullRomCurve3, x: number, z: number, samples = 180): { t: number; distance: number } {
+function closestProgress(samples: readonly THREE.Vector3[], x: number, z: number): { t: number; distance: number } {
   let bestT = 0;
   let bestDistance = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < samples; i++) {
-    const t = i / samples;
-    const point = curve.getPointAt(t);
+  for (let i = 0; i < samples.length - 1; i++) {
+    const point = samples[i];
     const distance = Math.hypot(point.x - x, point.z - z);
     if (distance < bestDistance) {
       bestDistance = distance;
-      bestT = t;
+      bestT = i / (samples.length - 1);
     }
   }
   return { t: bestT, distance: bestDistance };
@@ -226,8 +214,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   leaderboardEntry,
   isReplayMode = false,
   isMultiplayerRoom = false,
+  multiplayerRound = 1,
+  multiplayerRoundsTotal = 3,
+  multiplayerResult = null,
+  multiplayerFinishedCount = 0,
+  multiplayerPlayerCount = 0,
+  multiplayerDidSubmit = false,
+  multiplayerIsHost = false,
+  coach,
   replayFrames = [],
   onFinishRace,
+  onFinishMultiplayerRound,
+  onStartNextMultiplayerRound,
+  onExitMultiplayer,
   onQuit,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -261,7 +260,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [raceTime, setRaceTime] = useState(0);
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [engineTemp, setEngineTemp] = useState(45);
-  const [nitroCharge, setNitroCharge] = useState(100);
+  const [nitroCharge, setNitroCharge] = useState(() => getLevelBenefits(profile.level).nitroCapacity);
   const [cameraMode, setCameraMode] = useState<'chase' | 'hood' | 'cockpit' | 'topdown'>('chase');
   const [driftScore, setDriftScore] = useState(0);
   const [raceWon, setRaceWon] = useState(false);
@@ -276,11 +275,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     return layout.points.map(([x, z]) => `${10 + ((x - minX) / Math.max(1, maxX - minX)) * 80},${7 + ((maxZ - z) / Math.max(1, maxZ - minZ)) * 56}`);
   }, [layout]);
   const minimapMarker = minimapPoints[Math.floor(trackProgress * minimapPoints.length) % minimapPoints.length]?.split(',').map(Number) ?? [50, 35];
+  const levelBenefits = useMemo(() => getLevelBenefits(profile.level), [profile.level]);
   const baseRef = useMemo(() => ({
-    maxSpeed: (car.speed / 2.8) * (1 + Math.max(0, profile.level - 1) * 0.025),
-    acceleration: (car.acceleration / 22) * (1 + Math.max(0, profile.level - 1) * 0.018),
-    handling: 1.3 + car.handling / 90 + ((upgrades.find((u) => u.id === 'tires')?.level ?? 1) - 1) * 0.12,
-  }), [car.id, car.speed, car.acceleration, car.handling, profile.level, upgrades]);
+    maxSpeed: (car.speed / 2.8) * levelBenefits.speedMultiplier,
+    acceleration: (car.acceleration / 22) * levelBenefits.accelerationMultiplier,
+    handling: (1.3 + car.handling / 90 + ((upgrades.find((u) => u.id === 'tires')?.level ?? 1) - 1) * 0.12) * levelBenefits.handlingMultiplier,
+  }), [car.id, car.speed, car.acceleration, car.handling, levelBenefits, upgrades]);
 
   // Keep the animation loop in sync without re-creating WebGL state on each HUD render.
   runRef.current.gameState = gameState;
@@ -338,7 +338,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       window.removeEventListener('keyup', handleUp);
       inputRef.current = { accelerate: false, brake: false, left: false, right: false, nitro: false };
     };
-  }, [nitroCharge, engineTemp, gameState]);
+  }, [nitroCharge, engineTemp, gameState, profile.level]);
 
   function cycleCamera() {
     setCameraMode((mode) => {
@@ -352,12 +352,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     if (nitroCharge < 18 || engineTemp >= 108 || gameStateRef.current !== 'racing' || nitroActiveRef.current) return;
     nitroActiveRef.current = true;
     runRef.current.nitroActive = true;
-    setNitroCharge((charge) => Math.max(0, charge - 28));
+    const nitroCost = Math.max(16, 28 - Math.max(0, profile.level - 1) * 0.7);
+    const nitroDuration = 1350 + Math.min(650, Math.max(0, profile.level - 1) * 45);
+    setNitroCharge((charge) => Math.max(0, charge - nitroCost));
     soundManager.playNitro();
     window.setTimeout(() => {
       nitroActiveRef.current = false;
       runRef.current.nitroActive = false;
-    }, 1350);
+    }, nitroDuration);
   }
 
   useEffect(() => {
@@ -383,7 +385,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       console.error('WebGL is unavailable on this device.', error);
       return;
     }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+    const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+    const lowEndDevice = (navigator.hardwareConcurrency || 4) <= 4 || (deviceMemory ?? 4) <= 3;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lowEndDevice ? 1.35 : 1.75));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -397,35 +401,41 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const sun = new THREE.DirectionalLight(0xfff1d5, 2.25);
     sun.position.set(-60, 110, -30);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(lowEndDevice ? 512 : 1024, lowEndDevice ? 512 : 1024);
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 520;
+    sun.shadow.camera.left = -250;
+    sun.shadow.camera.right = 250;
+    sun.shadow.camera.top = 250;
+    sun.shadow.camera.bottom = -250;
+    sun.shadow.bias = -0.00035;
+    sun.shadow.normalBias = 0.025;
     scene.add(sun);
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(1800, 1800),
-      new THREE.MeshStandardMaterial({ color: layout.ground, roughness: 1 })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.18;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    scene.add(createSkyDome(layout.sky, layout.fog));
 
     const points = layout.points.map(([x, z]) => new THREE.Vector3(x, 0, z));
     const curve = new THREE.CatmullRomCurve3(points, true, 'catmullrom', 0.42);
     curve.closed = true;
     curve.arcLengthDivisions = 500;
     const trackLength = curve.getLength();
+    const trackSamples = Array.from({ length: 241 }, (_, index) => curve.getPointAt(index / 240));
+
+    if (track.id.includes('coastal')) scene.add(createCoastalWater());
+    scene.add(createTerrainMesh(curve, layout, track.id));
+
+    const gravelTexture = createSurfaceTexture('#807e75', track.id.length * 71, 6000);
 
     const shoulder = new THREE.Mesh(
       createRibbon(curve, layout.width + 2.6, 440, 0.06),
-      new THREE.MeshStandardMaterial({ color: 0x85847e, roughness: 0.92, side: THREE.DoubleSide })
+      new THREE.MeshStandardMaterial({ color: 0xe7e5dc, map: gravelTexture, roughness: 0.96, side: THREE.DoubleSide })
     );
     shoulder.receiveShadow = true;
     scene.add(shoulder);
 
-    const asphaltTexture = createAsphaltTexture();
+    const asphaltTexture = createSurfaceTexture('#45494c', track.id.length * 149, 10000);
     const road = new THREE.Mesh(
       createRibbon(curve, layout.width, 440),
-      new THREE.MeshStandardMaterial({ color: layout.road, map: asphaltTexture, roughness: 0.88, metalness: 0.02, side: THREE.DoubleSide })
+      new THREE.MeshStandardMaterial({ color: 0xffffff, map: asphaltTexture, roughness: 0.91, metalness: 0.01, side: THREE.DoubleSide })
     );
     road.receiveShadow = true;
     road.castShadow = false;
@@ -495,7 +505,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     }
     [...redCurbs, ...whiteCurbs].forEach((instances) => { instances.receiveShadow = true; scene.add(instances); });
 
-    const lineMat = new THREE.MeshBasicMaterial({ color: layout.line, transparent: true, opacity: 0.42 });
+    const lineMat = new THREE.MeshStandardMaterial({ color: 0xf2efe6, roughness: 0.78 });
     const edgeOffset = layout.width * 0.42;
     for (const sign of [-1, 1]) {
       const edgePoints: THREE.Vector3[] = [];
@@ -545,27 +555,39 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const distance = layout.width * (0.95 + (i % 3) * 0.28);
       const x = p.x + side.x * distance * sign;
       const z = p.z + side.z * distance * sign;
-      if (track.id === 'mp_neon_docks' && i % 2 === 0) {
-        const height = 8 + (i % 3) * 3;
-        const tower = new THREE.Mesh(new THREE.BoxGeometry(5.5, height, 4.8), new THREE.MeshStandardMaterial({ color: i % 4 === 0 ? 0x273048 : 0x182434, roughness: 0.68, metalness: 0.2 }));
+      if ((track.id === 'mp_neon_docks' || track.id === 'city_ring') && i % 2 === 0) {
+        const isNightCity = track.id === 'mp_neon_docks';
+        const height = (isNightCity ? 8 : 10) + (i % 3) * 3;
+        const tower = new THREE.Mesh(new THREE.BoxGeometry(5.5, height, 4.8), new THREE.MeshStandardMaterial({ color: i % 4 === 0 ? (isNightCity ? 0x273048 : 0x65737b) : (isNightCity ? 0x182434 : 0x3e4b53), roughness: 0.68, metalness: 0.2 }));
         tower.position.set(x, height / 2, z);
         tower.castShadow = true;
         scene.add(tower);
-        const neon = new THREE.Mesh(new THREE.BoxGeometry(5.65, 0.16, 0.08), new THREE.MeshBasicMaterial({ color: i % 4 === 0 ? 0xf472b6 : 0x22d3ee }));
+        const neon = new THREE.Mesh(new THREE.BoxGeometry(5.65, 0.16, 0.08), new THREE.MeshBasicMaterial({ color: isNightCity ? (i % 4 === 0 ? 0xf472b6 : 0x22d3ee) : (i % 4 === 0 ? 0xfbbf24 : 0x67e8f9) }));
         neon.position.set(x, height * 0.62, z + 2.45);
         scene.add(neon);
         for (let floor = 1; floor < Math.floor(height / 2.5); floor++) {
-          const windows = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.12, 0.07), new THREE.MeshBasicMaterial({ color: floor % 2 ? 0x5287a0 : 0xc084fc }));
+          const windows = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.12, 0.07), new THREE.MeshBasicMaterial({ color: isNightCity ? (floor % 2 ? 0x5287a0 : 0xc084fc) : (floor % 2 ? 0xfde68a : 0xb8d6e1) }));
           windows.position.set(x, floor * 2.4, z + 2.46);
           scene.add(windows);
         }
-      } else if (track.id === 'mp_desert_canyon' && i % 2 === 0) {
+      } else if ((track.id === 'mp_desert_canyon' || track.id === 'desert_canyon') && i % 2 === 0) {
         const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(2.1 + (i % 3) * 0.6, 0), new THREE.MeshStandardMaterial({ color: i % 4 === 0 ? 0xc68b4b : 0x8b5e37, roughness: 0.98 }));
         rock.position.set(x, 1.5, z);
         rock.rotation.set(i * 0.31, i * 0.57, i * 0.19);
         rock.scale.y = 1.2 + (i % 3) * 0.25;
         rock.castShadow = true;
         scene.add(rock);
+      } else if (track.id === 'volcano_night' && i % 2 === 0) {
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(2.2 + (i % 3) * 0.65, 1), new THREE.MeshStandardMaterial({ color: i % 4 === 0 ? 0x4a3536 : 0x30292e, roughness: 0.96, flatShading: true }));
+        rock.position.set(x, 1.3, z);
+        rock.rotation.set(i * 0.37, i * 0.53, i * 0.21);
+        rock.scale.y = 1.4 + (i % 3) * 0.22;
+        rock.castShadow = true;
+        scene.add(rock);
+        const lavaVein = new THREE.Mesh(new THREE.BoxGeometry(1.5 + (i % 4) * 0.2, 0.08, 0.12), new THREE.MeshBasicMaterial({ color: i % 4 === 0 ? 0xffb45b : 0xf05a3d }));
+        lavaVein.position.set(x, 2.1, z + 1.45);
+        lavaVein.rotation.y = i * 0.38;
+        scene.add(lavaVein);
       } else if (i % 3 === 0 && layout.decoration === 'trees') {
         const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.35, 2.2, 7), new THREE.MeshStandardMaterial({ color: 0x6b4428 }));
         trunk.position.set(x, 1.05, z);
@@ -583,24 +605,26 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
     }
 
-    const ridgeColor = track.id.includes('desert') ? 0x76543a : track.id.includes('snow') || track.id.includes('mountain') ? 0x64748b : track.id.includes('neon') ? 0x26384d : 0x345343;
-    const ridgeMaterial = new THREE.MeshStandardMaterial({ color: ridgeColor, roughness: 1 });
-    const snowMaterial = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.92 });
-    for (let i = 0; i < 22; i++) {
-      const angle = (i / 22) * Math.PI * 2;
-      const radius = 176 + (i % 4) * 11;
-      const height = 26 + (i % 5) * 8;
-      const ridge = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), ridgeMaterial);
-      ridge.scale.set(19 + (i % 3) * 5, height, 17 + (i % 4) * 4);
-      ridge.position.set(Math.cos(angle) * radius, height * 0.38, Math.sin(angle) * radius);
-      ridge.rotation.y = angle + (i % 3) * 0.4;
-      ridge.castShadow = true;
-      scene.add(ridge);
-      if ((track.id.includes('snow') || track.id.includes('mountain')) && i % 2 === 0) {
-        const snowCap = new THREE.Mesh(new THREE.ConeGeometry(8 + (i % 3) * 2, 15, 5), snowMaterial);
-        snowCap.position.set(ridge.position.x, height * 0.86, ridge.position.z);
-        snowCap.rotation.y = angle;
-        scene.add(snowCap);
+    if (track.id.includes('snow') || track.id.includes('mountain')) {
+      const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x677780, roughness: 0.98 });
+      const snowMaterial = new THREE.MeshStandardMaterial({ color: 0xe9f1f5, roughness: 0.9 });
+      for (let i = 0; i < 11; i++) {
+        const angle = (i / 11) * Math.PI * 2;
+        const radius = 205 + (i % 3) * 18;
+        const height = 58 + (i % 4) * 12;
+        const mountain = new THREE.Mesh(new THREE.ConeGeometry(34 + (i % 3) * 7, height, 18, 8), rockMaterial);
+        mountain.position.set(Math.cos(angle) * radius, height * 0.42, Math.sin(angle) * radius);
+        mountain.rotation.y = angle * 0.7;
+        mountain.castShadow = true;
+        mountain.receiveShadow = true;
+        scene.add(mountain);
+        if (i % 2 === 0) {
+          const capHeight = height * 0.36;
+          const snowCap = new THREE.Mesh(new THREE.ConeGeometry(20 + (i % 3) * 4, capHeight, 18, 5), snowMaterial);
+          snowCap.position.set(mountain.position.x, height * 0.78, mountain.position.z);
+          snowCap.rotation.y = mountain.rotation.y;
+          scene.add(snowCap);
+        }
       }
     }
 
@@ -611,7 +635,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const spawnPoint = curve.getPointAt(spawnT);
     const spawnTangent = curve.getTangentAt(spawnT);
     physicsRef.current = { x: spawnPoint.x, z: spawnPoint.z, heading: Math.atan2(spawnTangent.x, spawnTangent.z), speed: 0 };
-    player.position.set(spawnPoint.x, 0, spawnPoint.z);
+    player.position.set(spawnPoint.x, 0.12, spawnPoint.z);
     player.rotation.y = physicsRef.current.heading;
     previousProgressRef.current = spawnT;
 
@@ -623,35 +647,42 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const progress = 0.025 + index * 0.022;
       const p = curve.getPointAt(progress);
       const tangent = curve.getTangentAt(progress);
-      mesh.position.set(p.x, 0, p.z);
+      mesh.position.set(p.x, 0.12, p.z);
       mesh.rotation.y = Math.atan2(tangent.x, tangent.z);
       vehiclesRef.current.push({ group: mesh, progress, speed: 19.5 - index * 1.1, finished: false });
     });
 
     const remoteVehicles = new Map<string, THREE.Group>();
+    const remoteTargets = new Map<string, { position: THREE.Vector3; heading: number }>();
     const unsubscribeNetwork = isMultiplayerRoom ? lanMultiplayer.subscribe((message) => {
       if (message.type === 'player_state') {
         const playerId = String(message.playerId ?? '');
         if (!playerId || playerId === lanMultiplayer.playerId) return;
-        let remote = remoteVehicles.get(playerId);
-        if (!remote) {
-          remote = makeVehicleModel(String(message.color ?? '#38bdf8'), '#0f172a', 'sport');
-          scene.add(remote);
-          remoteVehicles.set(playerId, remote);
-        }
         const x = Number(message.x);
         const z = Number(message.z);
         const heading = Number(message.heading);
-        if ([x, z, heading].every(Number.isFinite)) {
-          remote.position.set(x, 0, z);
-          remote.rotation.y = heading;
+        if (![x, z, heading].every(Number.isFinite)) return;
+        let remote = remoteVehicles.get(playerId);
+        if (!remote) {
+          remote = makeVehicleModel(String(message.color ?? '#38bdf8'), '#0f172a', 'sport');
+          remote.position.set(x, 0.12, z);
+          scene.add(remote);
+          remoteVehicles.set(playerId, remote);
         }
+        let target = remoteTargets.get(playerId);
+        if (!target) {
+          target = { position: new THREE.Vector3(x, 0.12, z), heading };
+          remoteTargets.set(playerId, target);
+        }
+        target.position.set(x, 0.12, z);
+        target.heading = heading;
       } else if (message.type === 'player_left') {
         const playerId = String(message.playerId ?? '');
         const remote = remoteVehicles.get(playerId);
         if (remote) {
           scene.remove(remote);
           remoteVehicles.delete(playerId);
+          remoteTargets.delete(playerId);
         }
       }
     }) : () => undefined;
@@ -672,12 +703,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const physics = physicsRef.current;
     const effectiveMaxSpeed = baseRef.maxSpeed * (1 + Math.max(0, (upgrades.find((u) => u.id === 'engine')?.level ?? 1) - 1) * 0.055);
     const acceleration = baseRef.acceleration;
-    const steering = baseRef.handling * (1 + Math.max(0, profile.level - 1) * 0.012);
+    const steering = baseRef.handling;
     let animationId = 0;
     let previousTime = 0;
     let hudAccumulator = 0;
     let lastEngineUpdate = 0;
     let lastNetworkUpdate = 0;
+    let smoothedSteering = 0;
+    const cameraTarget = new THREE.Vector3();
+    const cameraFollowBlend = (delta: number) => 1 - Math.exp(-delta * 7.5);
 
     const finishRace = (won: boolean) => {
       if (finishedRef.current) return;
@@ -697,21 +731,25 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       if (state === 'racing' && !isReplayMode) {
         const input = inputRef.current;
-        const maxSpeed = effectiveMaxSpeed * (nitroActiveRef.current ? 1.48 : 1);
+        const maxSpeed = effectiveMaxSpeed * (nitroActiveRef.current ? levelBenefits.nitroMultiplier : 1);
         if (input.accelerate) physics.speed = Math.min(maxSpeed, physics.speed + acceleration * dt);
         else if (input.brake) physics.speed = Math.max(-maxSpeed * 0.34, physics.speed - acceleration * dt * 1.6);
-        else physics.speed *= Math.pow(0.982, dt * 60);
+        else physics.speed *= Math.exp(-0.52 * dt);
 
-        if (input.left && Math.abs(physics.speed) > 0.2) physics.heading += steering * dt * Math.sign(physics.speed);
-        if (input.right && Math.abs(physics.speed) > 0.2) physics.heading -= steering * dt * Math.sign(physics.speed);
-        cockpitRig.steeringWheel.rotation.z = input.left ? 0.42 : input.right ? -0.42 : 0;
+        const steeringTarget = Number(input.left) - Number(input.right);
+        smoothedSteering += (steeringTarget - smoothedSteering) * (1 - Math.exp(-dt * 11));
+        const speedFactor = THREE.MathUtils.clamp(Math.abs(physics.speed) / Math.max(1, maxSpeed), 0, 1);
+        const turnRate = steering * 0.5 * (0.25 + speedFactor * 0.75);
+        if (Math.abs(physics.speed) > 0.2) physics.heading += smoothedSteering * turnRate * dt * Math.sign(physics.speed);
+        const wheelTarget = smoothedSteering * 0.42;
+        cockpitRig.steeringWheel.rotation.z += (wheelTarget - cockpitRig.steeringWheel.rotation.z) * (1 - Math.exp(-dt * 14));
 
         physics.x += Math.sin(physics.heading) * physics.speed * dt;
         physics.z += Math.cos(physics.heading) * physics.speed * dt;
-        const progress = closestProgress(curve, physics.x, physics.z);
+        const progress = closestProgress(trackSamples, physics.x, physics.z);
         const offRoad = progress.distance > layout.width * 0.51;
         if (offRoad) {
-          physics.speed *= Math.pow(0.86, dt * 60);
+          physics.speed *= Math.exp(-2.8 * dt);
           if (Math.abs(physics.speed) > 3) soundManager.playCrash();
         }
         if (previousProgressRef.current > 0.82 && progress.t < 0.18 && Math.abs(physics.speed) > 2.5 && !offRoad) {
@@ -723,7 +761,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         previousProgressRef.current = progress.t;
 
         if (playerRef.current) {
-          playerRef.current.position.set(physics.x, 0, physics.z);
+          playerRef.current.position.set(physics.x, 0.12, physics.z);
           playerRef.current.rotation.y = physics.heading;
         }
 
@@ -738,7 +776,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           const t = vehicle.progress % 1;
           const p = curve.getPointAt(t);
           const tangent = curve.getTangentAt(t);
-          vehicle.group.position.set(p.x, 0, p.z);
+          vehicle.group.position.set(p.x, 0.12, p.z);
           vehicle.group.rotation.y = Math.atan2(tangent.x, tangent.z);
         }
         if (vehiclesRef.current.some((vehicle) => vehicle.finished) && lap <= track.laps) finishRace(false);
@@ -762,7 +800,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           if (nitroActiveRef.current) setEngineTemp((temp) => Math.min(115, temp + 1.1));
           else if (Math.abs(physics.speed) > 24) setEngineTemp((temp) => Math.min(96, temp + 0.24));
           else setEngineTemp((temp) => Math.max(45, temp - 0.34));
-          setNitroCharge((charge) => Math.min(100, charge + 0.12));
+          setNitroCharge((charge) => Math.min(levelBenefits.nitroCapacity, charge + 0.12));
           if (track.isDriftMode && (input.left || input.right) && Math.abs(physics.speed) > 12) setDriftScore((score) => score + 5);
         }
         if (time - lastEngineUpdate > 170) {
@@ -771,29 +809,47 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           lastEngineUpdate = time;
         }
       } else if (isReplayMode && replayFrames.length > 0) {
-        const frame = replayFrames[replayIndexRef.current % replayFrames.length];
-        if (frame && playerRef.current) {
-          playerRef.current.position.set(frame.x, 0, frame.y);
-          playerRef.current.rotation.y = frame.angle;
-          setCurrentSpeed(Math.round(Math.abs(frame.speed) * 3.6));
+        const frameCount = replayFrames.length;
+        const cursor = replayIndexRef.current % frameCount;
+        const frame = replayFrames[Math.floor(cursor)];
+        const nextFrame = replayFrames[(Math.floor(cursor) + 1) % frameCount];
+        if (frame && nextFrame && playerRef.current) {
+          const blend = cursor - Math.floor(cursor);
+          playerRef.current.position.set(THREE.MathUtils.lerp(frame.x, nextFrame.x, blend), 0.12, THREE.MathUtils.lerp(frame.y, nextFrame.y, blend));
+          const angleDelta = Math.atan2(Math.sin(nextFrame.angle - frame.angle), Math.cos(nextFrame.angle - frame.angle));
+          playerRef.current.rotation.y = frame.angle + angleDelta * blend;
+          setCurrentSpeed(Math.round(Math.abs(THREE.MathUtils.lerp(frame.speed, nextFrame.speed, blend)) * 3.6));
         }
-        replayIndexRef.current += 1;
+        replayIndexRef.current += dt * 60;
+      }
+
+      for (const [playerId, remote] of remoteVehicles) {
+        const target = remoteTargets.get(playerId);
+        if (!target) continue;
+        const blend = 1 - Math.exp(-dt * 12);
+        remote.position.lerp(target.position, blend);
+        const angleDelta = Math.atan2(Math.sin(target.heading - remote.rotation.y), Math.cos(target.heading - remote.rotation.y));
+        remote.rotation.y += angleDelta * blend;
       }
 
       if (playerRef.current && cameraRef.current && state !== 'paused') {
         const p = playerRef.current.position;
         cockpitRig.group.visible = cameraModeRef.current === 'cockpit';
+        const cameraBlend = cameraFollowBlend(dt);
         if (cameraModeRef.current === 'chase') {
-          camera.position.lerp(new THREE.Vector3(p.x - Math.sin(physics.heading) * 9.5, 3.7, p.z - Math.cos(physics.heading) * 9.5), 0.16);
+          cameraTarget.set(p.x - Math.sin(physics.heading) * 9.5, 3.7, p.z - Math.cos(physics.heading) * 9.5);
+          camera.position.lerp(cameraTarget, cameraBlend);
           camera.lookAt(p.x + Math.sin(physics.heading) * 7, 1.1, p.z + Math.cos(physics.heading) * 7);
         } else if (cameraModeRef.current === 'hood') {
-          camera.position.lerp(new THREE.Vector3(p.x + Math.sin(physics.heading) * 1.5, 2.3, p.z + Math.cos(physics.heading) * 1.5), 0.15);
+          cameraTarget.set(p.x + Math.sin(physics.heading) * 1.5, 2.3, p.z + Math.cos(physics.heading) * 1.5);
+          camera.position.lerp(cameraTarget, cameraBlend);
           camera.lookAt(p.x + Math.sin(physics.heading) * 22, 1.5, p.z + Math.cos(physics.heading) * 22);
         } else if (cameraModeRef.current === 'cockpit') {
           camera.position.lerp(new THREE.Vector3(p.x - Math.sin(physics.heading) * 0.35 - Math.cos(physics.heading) * 0.38, 1.42, p.z - Math.cos(physics.heading) * 0.35 + Math.sin(physics.heading) * 0.38), 0.42);
           camera.rotation.set(0, Math.PI + physics.heading, 0);
         } else {
-          camera.position.lerp(new THREE.Vector3(p.x, 38, p.z - 18), 0.1);
+          cameraTarget.set(p.x, 38, p.z - 18);
+          camera.position.lerp(cameraTarget, cameraBlend * 0.8);
           camera.lookAt(p.x, 0, p.z);
         }
       }
@@ -815,12 +871,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       soundManager.stopEngine();
       resizeObserver.disconnect();
       renderer.dispose();
+      scene.traverse((object) => { if (object.userData.remocarVehicleWrapper) object.userData.remocarDestroyed = true; });
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh) {
-          object.geometry.dispose();
+          if (!object.userData.remocarSharedGeometry) object.geometry.dispose();
           const materials = Array.isArray(object.material) ? object.material : [object.material];
           materials.forEach((material) => {
-            Object.values(material).forEach((value) => { if (value instanceof THREE.Texture) value.dispose(); });
+            if (!material.userData.remocarSharedTextures) Object.values(material).forEach((value) => { if (value instanceof THREE.Texture) value.dispose(); });
             material.dispose();
           });
         }
@@ -876,6 +933,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           </svg>
           <div className="text-center text-[9px] text-slate-400">{track.name}</div>
         </div>
+        <div className="absolute right-4 top-4 z-10 flex max-w-[58%] items-center gap-2 rounded-xl border border-amber-300/20 bg-slate-950/85 p-2 shadow-xl backdrop-blur sm:max-w-[360px]">
+          <img src={coach.portrait} alt="" className="h-10 w-9 shrink-0 rounded-lg object-cover" />
+          <div className="min-w-0 text-right"><div className="text-[10px] font-black text-amber-200">{coach.name} · نصيحة</div><div className="line-clamp-2 text-[9px] leading-4 text-slate-200">{coach.hint}</div></div>
+        </div>
         <div className="absolute bottom-4 left-4 bg-slate-950/85 border border-slate-700 p-3 rounded-2xl text-white z-10 flex items-center gap-3">
           <div className="text-xl font-black text-red-400">{currentSpeed}<span className="text-[9px] text-slate-400 block">KM/H</span></div>
           <div className="text-xs text-slate-300"><Thermometer className="w-4 h-4 inline text-amber-400" /> {Math.round(engineTemp)}°C</div>
@@ -901,7 +962,30 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         {gameState === 'paused' && <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center z-30"><h2 className="text-3xl font-black text-white mb-5">توقف مؤقت</h2><div className="flex gap-3"><button onClick={resumeRace} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold"><Play className="inline w-4 h-4" /> متابعة</button><button onClick={onQuit} className="bg-slate-700 text-white px-6 py-3 rounded-xl">إنهاء السباق</button></div></div>}
 
-        {gameState === 'finished' && <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center z-30 p-6 text-center"><div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 ${raceWon ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-700 text-slate-200'}`}><Trophy className="w-9 h-9" /></div><h2 className="text-3xl font-black text-white mb-2">{raceWon ? 'فوز مستحق!' : 'انتهى السباق'}</h2><p className="text-slate-300 mb-2">{track.name} · {raceTime.toFixed(1)} ثانية</p><p className="text-amber-300 font-bold mb-5">{raceWon ? `+${coinsCollected + 150} عملة` : `+${coinsCollected + 35} عملة مشاركة`}</p><button onClick={() => onFinishRace(raceWon, coinsCollected + (raceWon ? 150 : 35), recordedFramesRef.current, raceTime)} className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 text-white font-bold px-7 py-3 rounded-xl"><span>حفظ النتيجة</span><ArrowRight className="w-5 h-5" /></button></div>}
+        {gameState === 'finished' && (isMultiplayerRoom ? (
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm flex flex-col items-center justify-center z-30 p-5 text-center overflow-y-auto">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center mb-3"><Trophy className="w-8 h-8" /></div>
+            {!multiplayerResult ? <>
+              <h2 className="text-2xl font-black text-white mb-1">انتهت الجولة {multiplayerRound} من {multiplayerRoundsTotal}</h2>
+              <p className="text-slate-300 mb-3">{track.name} · توقيتك {raceTime.toFixed(1)} ثانية</p>
+              {multiplayerDidSubmit ? <p className="text-amber-200 font-bold mb-4" aria-live="polite">تم إرسال توقيتك · بانتظار بقية اللاعبين ({multiplayerFinishedCount}/{multiplayerPlayerCount})</p> : <button onClick={() => onFinishMultiplayerRound?.(raceTime)} className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 text-white font-bold px-6 py-3 rounded-xl"><span>إرسال نتيجة الجولة</span><ArrowRight className="w-5 h-5" /></button>}
+            </> : <>
+              <h2 className="text-2xl font-black text-white mb-1">{multiplayerResult.type === 'match_complete' ? 'انتهت البطولة!' : `نتائج الجولة ${multiplayerResult.round}`}</h2>
+              {multiplayerResult.type === 'round_complete' && <p className="text-slate-300 mb-3">{multiplayerResult.finishOrder.find((result) => result.playerId === lanMultiplayer.playerId)?.place ? `مركزك في الجولة: ${multiplayerResult.finishOrder.find((result) => result.playerId === lanMultiplayer.playerId)?.place}` : 'تم اعتماد ترتيب الجولة.'}</p>}
+              {multiplayerResult.type === 'match_complete' && <p className="text-amber-200 font-bold mb-3">{multiplayerResult.winner ? `بطل البطولة: ${multiplayerResult.winner.name}` : 'اكتملت البطولة'}</p>}
+              <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900/80 p-3 mb-4 text-right">
+                <h3 className="text-xs font-bold text-slate-300 mb-2">الترتيب الإجمالي · النقاط</h3>
+                <ol className="space-y-1.5">
+                  {multiplayerResult.scores.map((standing, index) => <li key={standing.playerId} className={`flex items-center justify-between gap-3 text-sm ${standing.playerId === lanMultiplayer.playerId ? 'text-amber-200 font-bold' : 'text-slate-200'}`}><span className="truncate">{index + 1}. {standing.name}</span><span className="shrink-0">{standing.points} نقطة</span></li>)}
+                </ol>
+              </div>
+              {multiplayerResult.type === 'round_complete' ? (multiplayerIsHost
+                ? <button onClick={onStartNextMultiplayerRound} className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold px-6 py-3 rounded-xl">بدء الجولة التالية ({multiplayerResult.round + 1}/{multiplayerResult.roundsTotal})</button>
+                : <p className="text-slate-300 text-sm" aria-live="polite">بانتظار المضيف لبدء الجولة التالية…</p>)
+                : <button onClick={onExitMultiplayer} className="bg-gradient-to-r from-red-600 to-amber-500 text-white font-bold px-6 py-3 rounded-xl">العودة إلى القائمة الرئيسية</button>}
+            </>}
+          </div>
+        ) : <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center z-30 p-6 text-center"><div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 ${raceWon ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-700 text-slate-200'}`}><Trophy className="w-9 h-9" /></div><h2 className="text-3xl font-black text-white mb-2">{raceWon ? 'فوز مستحق!' : 'انتهى السباق'}</h2><p className="text-slate-300 mb-2">{track.name} · {raceTime.toFixed(1)} ثانية</p><p className="text-amber-300 font-bold mb-5">{raceWon ? `+${coinsCollected + 150} عملة` : `+${coinsCollected + 35} عملة مشاركة`}</p><button onClick={() => onFinishRace(raceWon, coinsCollected + (raceWon ? 150 : 35), recordedFramesRef.current, raceTime)} className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 text-white font-bold px-7 py-3 rounded-xl"><span>حفظ النتيجة</span><ArrowRight className="w-5 h-5" /></button></div>)}
       </div>
       {leaderboardEntry && <p className="mt-3 text-xs text-slate-400">أفضل توقيت مسجل: {leaderboardEntry.bestTime.toFixed(1)} ث</p>}
     </div>

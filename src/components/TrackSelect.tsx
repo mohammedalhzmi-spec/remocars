@@ -5,12 +5,14 @@ import { soundManager } from '../audio';
 
 interface TrackSelectProps {
   tracks: Track[];
+  playerLevel: number;
   onSelectTrack: (track: Track) => void;
   onBack: () => void;
 }
 
 export const TrackSelect: React.FC<TrackSelectProps> = ({
   tracks,
+  playerLevel,
   onSelectTrack,
   onBack,
 }) => {
@@ -85,7 +87,7 @@ export const TrackSelect: React.FC<TrackSelectProps> = ({
                   ) : (
                     <div className="w-full flex items-center justify-center gap-2 bg-slate-900/80 border border-slate-700 text-slate-400 py-4 rounded-2xl font-bold text-sm">
                       <Lock className="w-4 h-4" />
-                      <span>الحلبة مقفلة (أكمل الحلبات السابقة أولاً)</span>
+                      <span>{track.requiredLevel ? `مقفلة — افتحها عند المستوى ${track.requiredLevel} (مستواك ${playerLevel})` : 'الحلبة مقفلة — أكمل متطلبات التقدم لفتحها'}</span>
                     </div>
                   )}
                 </div>

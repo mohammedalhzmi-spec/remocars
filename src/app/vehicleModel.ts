@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Car, CarCustomization } from '../types';
 
 function createSideDecal(customization: CarCustomization, accent: string): THREE.CanvasTexture {
@@ -61,7 +62,7 @@ function createPlateTexture(text: string): THREE.CanvasTexture {
   return texture;
 }
 
-export function makeVehicle(color: string, secondaryColor: string, modelType: Car['modelType'], customization?: CarCustomization): THREE.Group {
+function makeProceduralVehicle(color: string, secondaryColor: string, modelType: Car['modelType'], customization?: CarCustomization): THREE.Group {
   const group = new THREE.Group();
   const paint = new THREE.Color(color);
   const darkPaint = new THREE.Color(secondaryColor);
@@ -164,4 +165,123 @@ export function makeVehicle(color: string, secondaryColor: string, modelType: Ca
     if (object instanceof THREE.Mesh) object.userData.pickable = false;
   });
   return group;
+}
+
+
+let carTemplatePromise: Promise<THREE.Group> | null = null;
+
+function loadCarTemplate(): Promise<THREE.Group> {
+  if (!carTemplatePromise) {
+    carTemplatePromise = new GLTFLoader().loadAsync('/models/car-concept/CarConcept.gltf').then(({ scene }) => {
+      // This licensed source model is Z-up and points toward -Y; convert it to
+      // the game's Y-up / forward-+Z convention before measuring and scaling.
+      scene.rotation.x = -Math.PI / 2;
+      scene.updateMatrixWorld(true);
+      const bounds = new THREE.Box3().setFromObject(scene);
+      const center = bounds.getCenter(new THREE.Vector3());
+      const size = bounds.getSize(new THREE.Vector3());
+      const scale = 4.55 / Math.max(size.z, size.x, 0.001);
+      scene.scale.setScalar(scale);
+      scene.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
+      scene.traverse((object) => {
+        if (object.name === 'InteriorSteeringEmblem') object.visible = false;
+      });
+      scene.updateMatrixWorld(true);
+      return scene;
+    }).catch((error: unknown) => {
+      carTemplatePromise = null;
+      throw error;
+    });
+  }
+  return carTemplatePromise;
+}
+
+function disposeObjectResources(root: THREE.Object3D) {
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    object.geometry.dispose();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    materials.forEach((material) => {
+      if (!material.userData.remocarSharedTextures) {
+        Object.values(material).forEach((value) => { if (value instanceof THREE.Texture) value.dispose(); });
+      }
+      material.dispose();
+    });
+  });
+}
+
+function makePremiumInstance(template: THREE.Group, color: string, secondaryColor: string, customization?: CarCustomization): THREE.Group {
+  const wrapper = new THREE.Group();
+  wrapper.userData.remocarPremiumModelInstance = true;
+  const model = template.clone(true);
+  model.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    object.userData.remocarSharedGeometry = true;
+    object.castShadow = true;
+    object.receiveShadow = true;
+    const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
+    const paintMaterials = sourceMaterials.map((source) => {
+      const material = source.clone();
+      material.userData.remocarSharedTextures = true;
+      const name = material.name.toLowerCase();
+      if ('color' in material && material.color instanceof THREE.Color && name.includes('paint')) {
+        material.color.set(name.includes('paint 2') || name.includes('secondary') ? secondaryColor : color);
+      }
+      return material;
+    });
+    object.material = Array.isArray(object.material) ? paintMaterials : paintMaterials[0];
+  });
+  wrapper.add(model);
+
+  if (customization?.plateText) {
+    const plate = model.getObjectByName('License Plate');
+    if (plate instanceof THREE.Mesh) {
+      const materials = Array.isArray(plate.material) ? plate.material : [plate.material];
+      const updated = materials.map((source) => {
+        const material = source.clone();
+        material.userData.remocarSharedTextures = false;
+        if ('map' in material) material.map = createPlateTexture(customization.plateText);
+        if ('color' in material && material.color instanceof THREE.Color) material.color.set('#ffffff');
+        material.needsUpdate = true;
+        return material;
+      });
+      plate.material = Array.isArray(plate.material) ? updated : updated[0];
+    }
+  }
+
+  if (customization && (customization.pattern !== 'solid' || customization.decalDataUrl)) {
+    const bounds = new THREE.Box3().setFromObject(wrapper);
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    const texture = createSideDecal(customization, secondaryColor);
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 });
+    for (const side of [-1, 1]) {
+      const decal = new THREE.Mesh(new THREE.PlaneGeometry(size.z * 0.43, size.y * 0.2), material);
+      decal.position.set(side * (bounds.max.x + 0.012), center.y, center.z);
+      decal.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+      decal.userData.remocarOwnedGeometry = true;
+      decal.castShadow = false;
+      wrapper.add(decal);
+    }
+  }
+  return wrapper;
+}
+
+/** Return a quick procedural stand-in, then swap in the realistic licensed car when loaded. */
+export function makeVehicle(color: string, secondaryColor: string, modelType: Car['modelType'], customization?: CarCustomization): THREE.Group {
+  const wrapper = new THREE.Group();
+  wrapper.userData.remocarVehicleWrapper = true;
+  const fallback = makeProceduralVehicle(color, secondaryColor, modelType, customization);
+  fallback.userData.remocarProceduralFallback = true;
+  wrapper.add(fallback);
+
+  void loadCarTemplate().then((template) => {
+    if (wrapper.userData.remocarDestroyed) return;
+    wrapper.remove(fallback);
+    disposeObjectResources(fallback);
+    wrapper.add(makePremiumInstance(template, color, secondaryColor, customization));
+  }).catch((error: unknown) => {
+    console.warn('REMOCAR premium vehicle could not load; using procedural fallback.', error);
+  });
+  return wrapper;
 }

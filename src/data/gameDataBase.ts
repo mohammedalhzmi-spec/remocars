@@ -140,5 +140,51 @@ export const INITIAL_CARS: Car[] = [
     unlocked: false,
     imageIcon: '👑',
     modelType: 'cyber'
+  },
+  {
+    id: 'remocar_lumen_gt',
+    name: 'REMOCAR Lumen GT',
+    description: 'كوبيه سياحية متوازنة، دهان معدني قابل للتخصيص ومحرك مصمم لمسارات المدينة.',
+    speed: 91,
+    acceleration: 92,
+    handling: 95,
+    color: '#06b6d4',
+    secondaryColor: '#0f172a',
+    price: 1800,
+    unlocked: false,
+    imageIcon: '🏎️',
+    modelType: 'sport',
+    requiredLevel: 3
+  },
+  {
+    id: 'remocar_drift_neo',
+    name: 'REMOCAR Drift Neo',
+    description: 'سيارة دريفت مجانية عند المستوى الخامس مع توجيه متجاوب وثبات محسّن.',
+    speed: 90,
+    acceleration: 93,
+    handling: 99,
+    color: '#d946ef',
+    secondaryColor: '#171125',
+    price: 0,
+    unlocked: false,
+    imageIcon: '💠',
+    modelType: 'drift',
+    requiredLevel: 5,
+    freeAtLevel: 5
+  },
+  {
+    id: 'remocar_vortex_rs',
+    name: 'REMOCAR Vortex RS',
+    description: 'سيارة خارقة من تصميم REMOCAR؛ تفتح للشراء عند المستوى الثامن.',
+    speed: 98,
+    acceleration: 97,
+    handling: 94,
+    color: '#a3e635',
+    secondaryColor: '#111827',
+    price: 3500,
+    unlocked: false,
+    imageIcon: '🌪️',
+    modelType: 'cyber',
+    requiredLevel: 8
   }
 ];

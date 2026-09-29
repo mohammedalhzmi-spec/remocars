@@ -17,6 +17,11 @@ import { PlayerProfileModal } from './components/PlayerProfileModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import { soundManager } from './audio';
 import { lanMultiplayer } from './app/lanMultiplayer';
+import { getLevelBenefits, getLevelFromXp, getLevelReward, getLevelTitle, LEVEL_MILESTONES } from './data/progression';
+import { getSelectedCoach } from './data/raceCoaches';
+import { playCoachIntroduction, playWinnerAnnouncement } from './app/coachAudio';
+import { LanTournamentResult } from './app/lanMultiplayer';
+import { stopAndroidLanHost } from './app/nativeLanHost';
 
 const GameCanvas = React.lazy(() => import('./components/GameCanvas').then((module) => ({ default: module.GameCanvas })));
 
@@ -44,6 +49,7 @@ export default function App() {
     const saved = localStorage.getItem('remocar_player_profile');
     return saved ? JSON.parse(saved) : { name: 'المتسابق البطل', level: 1, xp: 120, title: 'متسابق مبتدئ' };
   });
+  const [selectedCoachId, setSelectedCoachId] = useState(() => localStorage.getItem('remocar_selected_coach') || 'sara');
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => {
     const saved = localStorage.getItem('remocar_leaderboard');
@@ -52,7 +58,22 @@ export default function App() {
 
   const [cars, setCars] = useState<Car[]>(() => {
     const saved = localStorage.getItem('remocar_cars');
-    return saved ? JSON.parse(saved) : INITIAL_CARS;
+    if (!saved) return INITIAL_CARS.map((car) => ({ ...car, unlocked: car.unlocked || Boolean(car.freeAtLevel && profile.level >= car.freeAtLevel) }));
+    try {
+      const savedCars = JSON.parse(saved) as Car[];
+      return INITIAL_CARS.map((car) => {
+        const previous = savedCars.find((entry) => entry.id === car.id);
+        return {
+          ...car,
+          ...previous,
+          requiredLevel: car.requiredLevel,
+          freeAtLevel: car.freeAtLevel,
+          unlocked: Boolean(car.freeAtLevel && profile.level >= car.freeAtLevel) || (previous?.unlocked ?? car.unlocked),
+        };
+      });
+    } catch {
+      return INITIAL_CARS;
+    }
   });
 
   const [selectedCar, setSelectedCar] = useState<Car>(() => {
@@ -61,7 +82,21 @@ export default function App() {
 
   const [tracks, setTracks] = useState<Track[]>(() => {
     const saved = localStorage.getItem('remocar_tracks');
-    return saved ? JSON.parse(saved) : INITIAL_TRACKS;
+    if (!saved) return INITIAL_TRACKS.map((track) => ({ ...track, unlocked: track.unlocked || Boolean(track.requiredLevel && profile.level >= track.requiredLevel) }));
+    try {
+      const savedTracks = JSON.parse(saved) as Track[];
+      return INITIAL_TRACKS.map((track) => {
+        const previous = savedTracks.find((entry) => entry.id === track.id);
+        return {
+          ...track,
+          ...previous,
+          requiredLevel: track.requiredLevel,
+          unlocked: track.unlocked || Boolean(track.requiredLevel && profile.level >= track.requiredLevel) || (previous?.unlocked ?? false),
+        };
+      });
+    } catch {
+      return INITIAL_TRACKS;
+    }
   });
 
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(() => INITIAL_TRACKS[0]);
@@ -89,6 +124,44 @@ export default function App() {
   const [isMissionsOpen, setIsMissionsOpen] = useState<boolean>(false);
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState<boolean>(false);
   const [isMultiplayerRoom, setIsMultiplayerRoom] = useState<boolean>(false);
+  const [multiplayerRoundResult, setMultiplayerRoundResult] = useState<LanTournamentResult | null>(null);
+  const [multiplayerFinishedCount, setMultiplayerFinishedCount] = useState(0);
+  const [multiplayerPlayerCount, setMultiplayerPlayerCount] = useState(0);
+  const [multiplayerDidSubmit, setMultiplayerDidSubmit] = useState(false);
+  const [multiplayerRaceKey, setMultiplayerRaceKey] = useState(0);
+
+  useEffect(() => lanMultiplayer.subscribe((message) => {
+    if (message.type === 'room_joined' || message.type === 'room_state') {
+      if (Array.isArray(message.players)) setMultiplayerPlayerCount(message.players.length);
+      return;
+    }
+    if (message.type === 'race_start') {
+      setMultiplayerRoundResult(null);
+      setMultiplayerFinishedCount(0);
+      setMultiplayerDidSubmit(false);
+      return;
+    }
+    if (message.type === 'round_progress') {
+      if (typeof message.finishedCount === 'number') setMultiplayerFinishedCount(message.finishedCount);
+      if (typeof message.playerCount === 'number') setMultiplayerPlayerCount(message.playerCount);
+      return;
+    }
+    if (message.type === 'round_complete' || message.type === 'match_complete') {
+      const result = message as unknown as LanTournamentResult;
+      setMultiplayerRoundResult(result);
+      setMultiplayerFinishedCount(result.finishOrder.length);
+      setMultiplayerPlayerCount(result.finishOrder.length);
+      if (result.type === 'match_complete' && result.winner?.playerId === lanMultiplayer.playerId) {
+        playWinnerAnnouncement();
+        setToastMessage('مبروك! أنت بطل بطولة REMOCAR عبر Wi‑Fi.');
+      }
+      return;
+    }
+    if (message.type === 'error') {
+      setMultiplayerDidSubmit(false);
+      setToastMessage(String(message.message ?? 'تعذر إكمال إجراء البطولة.'));
+    }
+  }), []);
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState<boolean>(false);
 
@@ -100,11 +173,12 @@ export default function App() {
     localStorage.setItem('remocar_tracks', JSON.stringify(tracks));
     localStorage.setItem('remocar_upgrades', JSON.stringify(upgrades));
     localStorage.setItem('remocar_player_profile', JSON.stringify(profile));
+    localStorage.setItem('remocar_selected_coach', selectedCoachId);
     localStorage.setItem('remocar_leaderboard', JSON.stringify(leaderboard));
     if (replayFrames.length > 0) {
       localStorage.setItem('remocar_last_replay', JSON.stringify(replayFrames));
     }
-  }, [coins, trophies, cars, tracks, upgrades, profile, leaderboard, replayFrames]);
+  }, [coins, trophies, cars, tracks, upgrades, profile, leaderboard, replayFrames, selectedCoachId]);
 
   const handleToggleSound = () => {
     const next = !soundEnabled;
@@ -114,6 +188,10 @@ export default function App() {
   };
 
   const handleBuyCar = (car: Car) => {
+    if (profile.level < (car.requiredLevel ?? 1)) {
+      setToastMessage(`تُفتح هذه السيارة عند المستوى ${car.requiredLevel}. مستواك الحالي ${profile.level}.`);
+      return;
+    }
     if (coins >= car.price) {
       setCoins((c) => c - car.price);
       setCars((prev) =>
@@ -122,6 +200,8 @@ export default function App() {
       const unlockedCar = { ...car, unlocked: true };
       setSelectedCar(unlockedCar);
       setToastMessage(`تهانينا! تمتلك الآن سيارة ${car.name}`);
+    } else {
+      setToastMessage(`تحتاج إلى ${car.price - coins} عملة إضافية لشراء ${car.name}.`);
     }
   };
 
@@ -160,27 +240,39 @@ export default function App() {
   };
 
   const handleFinishRace = (won: boolean, coinsEarned: number, frames: ReplayFrame[], lapTime: number) => {
-    const finalEarned = Math.round(coinsEarned * (selectedTrack?.rewardMultiplier || 1) * (1 + profile.level * 0.1));
-    setCoins((c) => c + finalEarned);
-    
-    // Gain XP and check Level up
-    const newXp = profile.xp + (won ? 180 : 80);
-    let newLevel = profile.level;
-    let newTitle = profile.title;
-    while (newXp >= newLevel * 500) {
-      newLevel += 1;
-      if (newLevel >= 5) newTitle = 'أساطير السباقات المطلقة';
-      else if (newLevel >= 3) newTitle = 'متسابق محترف معتمد';
-    }
-    if (newLevel > profile.level) setToastMessage(`تهانينا! وصلت إلى المستوى ${newLevel} وفتحت مزايا جديدة!`);
-    setProfile({ ...profile, xp: newXp, level: newLevel, title: newTitle });
+    const raceRewardMultiplier = getLevelBenefits(profile.level).coinMultiplier;
+    const finalEarned = Math.round(coinsEarned * (selectedTrack?.rewardMultiplier || 1) * raceRewardMultiplier);
+    const newXp = profile.xp + (won ? 220 : 100);
+    const newLevel = Math.max(profile.level, getLevelFromXp(newXp));
+    const levelsGained = newLevel - profile.level;
+    let levelCoins = 0;
+    for (let level = profile.level + 1; level <= newLevel; level += 1) levelCoins += getLevelReward(level).coins;
+    const unlockMessages = LEVEL_MILESTONES
+      .filter((milestone) => milestone.level > profile.level && milestone.level <= newLevel)
+      .map((milestone) => milestone.description);
+    const levelStars = levelsGained;
 
-    if (won) {
-      setTrophies((t) => t + 1);
+    setCoins((current) => current + finalEarned + levelCoins);
+    setTrophies((current) => current + (won ? 3 : 1) + levelStars);
+    setProfile({ ...profile, xp: newXp, level: newLevel, title: getLevelTitle(newLevel) });
+    if (levelsGained > 0) {
+      setTracks((previous) => previous.map((track) => ({
+        ...track,
+        unlocked: track.unlocked || !track.requiredLevel || track.requiredLevel <= newLevel,
+      })));
+      setCars((previous) => previous.map((car) => ({
+        ...car,
+        unlocked: car.unlocked || Boolean(car.freeAtLevel && car.freeAtLevel <= newLevel),
+      })));
       soundManager.playVictory();
+    }
+    if (won) {
+      soundManager.playPodiumCelebration();
+      playWinnerAnnouncement();
     }
 
     // Update Leaderboard & Ghost if better lap time
+    const raceMessages = [`مكافأة السباق +${finalEarned} عملة`, ...(levelsGained > 0 ? [`المستوى ${newLevel} +${levelCoins} عملة و${levelStars} نجمة${unlockMessages.length ? ` · فتح: ${unlockMessages.join('، ')}` : ''}`] : [])];
     if (selectedTrack) {
       const existingEntry = leaderboard.find((l) => l.trackId === selectedTrack.id);
       if (!existingEntry || lapTime < existingEntry.bestTime) {
@@ -192,14 +284,34 @@ export default function App() {
           ghostFrames: frames,
         };
         setLeaderboard((prev) => [...prev.filter((l) => l.trackId !== selectedTrack.id), newEntry]);
-        setToastMessage(`رقم قياسي جديد في حلبة ${selectedTrack.name}! (${lapTime.toFixed(2)} ث)`);
+        raceMessages.push(`رقم قياسي جديد في ${selectedTrack.name} (${lapTime.toFixed(2)} ث)`);
       }
     }
+    setToastMessage(raceMessages.join(' — '));
 
     setReplayFrames(frames);
     setMissions((prev) =>
       prev.map((m) => (m.id === 'm1' ? { ...m, completed: true } : m))
     );
+    setScreen('menu');
+  };
+
+  const handleFinishMultiplayerRound = (lapTime: number) => {
+    if (multiplayerDidSubmit) return;
+    if (lanMultiplayer.finishRound(lapTime)) setMultiplayerDidSubmit(true);
+    else setToastMessage('انقطع اتصال الغرفة؛ تعذر إرسال نتيجة الجولة.');
+  };
+
+  const handleStartNextMultiplayerRound = () => {
+    if (!lanMultiplayer.startNextRound()) setToastMessage('تعذر بدء الجولة التالية. تأكد من أن الاتصال قائم وأنك المضيف.');
+  };
+
+  const handleExitMultiplayer = () => {
+    lanMultiplayer.close();
+    void stopAndroidLanHost();
+    setIsMultiplayerRoom(false);
+    setMultiplayerRoundResult(null);
+    setMultiplayerDidSubmit(false);
     setScreen('menu');
   };
 
@@ -218,6 +330,8 @@ export default function App() {
       <Navbar
         coins={coins}
         trophies={trophies}
+        profileLevel={profile.level}
+        carCount={cars.length}
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
         onNavigate={(s) => setScreen(s as any)}
@@ -233,6 +347,14 @@ export default function App() {
           <MainMenu
             selectedCar={selectedCar}
             playerName={profile.name}
+            profileLevel={profile.level}
+            profileXp={profile.xp}
+            stars={trophies}
+            carsCount={cars.length}
+            tracksCount={tracks.length}
+            selectedCoachId={selectedCoachId}
+            onSelectCoach={(coachId) => setSelectedCoachId(coachId)}
+            onPlayCoachVoice={playCoachIntroduction}
             hasReplay={replayFrames.length > 0}
             onNavigate={(s) => setScreen(s)}
             onOpenInstructions={() => setIsInstructionsOpen(true)}
@@ -246,6 +368,7 @@ export default function App() {
             cars={cars}
             selectedCar={selectedCar}
             coins={coins}
+            playerLevel={profile.level}
             upgrades={upgrades}
             onSelectCar={(car) => setSelectedCar(car)}
             onBuyCar={handleBuyCar}
@@ -257,8 +380,10 @@ export default function App() {
         {screen === 'tracks' && (
           <TrackSelect
             tracks={tracks}
+            playerLevel={profile.level}
             onSelectTrack={(track) => {
               setIsMultiplayerRoom(false);
+              playCoachIntroduction(getSelectedCoach(selectedCoachId, profile.level).id);
               setSelectedTrack(track);
               setScreen('game');
             }}
@@ -269,15 +394,27 @@ export default function App() {
         {screen === 'game' && selectedTrack && (
           <React.Suspense fallback={<div className="min-h-[70vh] grid place-items-center text-amber-300">جارٍ تحميل محرك السباق ثلاثي الأبعاد…</div>}>
             <GameCanvas
+              key={isMultiplayerRoom ? `lan-round-${multiplayerRaceKey}` : `solo-${selectedTrack.id}`}
               car={selectedCar}
               track={selectedTrack}
               profile={profile}
+              coach={getSelectedCoach(selectedCoachId, profile.level)}
               upgrades={upgrades}
               leaderboardEntry={currentTrackLeaderboard}
               isReplayMode={false}
               isMultiplayerRoom={isMultiplayerRoom}
+              multiplayerRound={lanMultiplayer.round}
+              multiplayerRoundsTotal={lanMultiplayer.roundsTotal}
+              multiplayerResult={multiplayerRoundResult}
+              multiplayerFinishedCount={multiplayerFinishedCount}
+              multiplayerPlayerCount={multiplayerPlayerCount}
+              multiplayerDidSubmit={multiplayerDidSubmit}
+              multiplayerIsHost={lanMultiplayer.isHost}
               onFinishRace={handleFinishRace}
-              onQuit={() => { if (isMultiplayerRoom) lanMultiplayer.close(); setIsMultiplayerRoom(false); setScreen('tracks'); }}
+              onFinishMultiplayerRound={handleFinishMultiplayerRound}
+              onStartNextMultiplayerRound={handleStartNextMultiplayerRound}
+              onExitMultiplayer={handleExitMultiplayer}
+              onQuit={() => { if (isMultiplayerRoom) { lanMultiplayer.close(); void stopAndroidLanHost(); } setIsMultiplayerRoom(false); setMultiplayerRoundResult(null); setMultiplayerDidSubmit(false); setScreen('tracks'); }}
             />
           </React.Suspense>
         )}
@@ -288,6 +425,7 @@ export default function App() {
               car={selectedCar}
               track={selectedTrack}
               profile={profile}
+              coach={getSelectedCoach(selectedCoachId, profile.level)}
               upgrades={upgrades}
               isReplayMode={true}
               isMultiplayerRoom={false}
@@ -333,17 +471,22 @@ export default function App() {
         onClose={() => setIsMultiplayerOpen(false)}
         onStartMultiplayerRace={(code, trackId) => {
           setIsMultiplayerOpen(false);
+          setMultiplayerRaceKey((key) => key + 1);
+          setMultiplayerRoundResult(null);
+          setMultiplayerDidSubmit(false);
+          playCoachIntroduction(getSelectedCoach(selectedCoachId, profile.level).id);
           const roomTrack = MULTIPLAYER_TRACKS.find((track) => track.id === trackId) || tracks[0];
           setSelectedTrack(roomTrack);
           setIsMultiplayerRoom(true);
           setScreen('game');
-          setToastMessage(`بدأ السباق الجماعي على ${roomTrack.name} (غرفة ${code}).`);
+          setToastMessage(`بدأت الجولة ${lanMultiplayer.round} من ${lanMultiplayer.roundsTotal} على ${roomTrack.name} (غرفة ${code}).`);
         }}
       />
 
       <PlayerProfileModal
         isOpen={isProfileOpen}
         profile={profile}
+        stars={trophies}
         onUpdateProfile={(newName) => setProfile({ ...profile, name: newName })}
         onClose={() => setIsProfileOpen(false)}
       />

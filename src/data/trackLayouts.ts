@@ -52,6 +52,26 @@ const layouts: Record<string, TrackLayout> = {
     width: 14, road: 0x526171, line: 0xdbeafe, sky: 0xb7d3ec, fog: 0xa0b4ca, fogDensity: 0.0045, ground: 0xcbd5e1,
     decoration: 'cones', decorationColor: 0xf1f5f9,
   },
+  city_ring: {
+    points: [[-68, -35], [-54, -64], [-8, -58], [14, -40], [57, -54], [72, -20], [55, 2], [70, 34], [34, 59], [5, 40], [-29, 61], [-65, 39], [-74, 2]],
+    width: 17, road: 0x303b49, line: 0x67e8f9, sky: 0x516980, fog: 0x3c5064, fogDensity: 0.0037, ground: 0x333c43,
+    decoration: 'cones', decorationColor: 0x38bdf8,
+  },
+  desert_canyon: {
+    points: [[-74, -26], [-64, -60], [-33, -48], [-8, -30], [24, -51], [61, -58], [78, -23], [52, 1], [70, 35], [38, 61], [5, 39], [-29, 60], [-64, 43], [-80, 12]],
+    width: 16, road: 0x5a4a3e, line: 0xfcd34d, sky: 0xd8a16c, fog: 0xa97951, fogDensity: 0.0029, ground: 0x94663f,
+    decoration: 'cones', decorationColor: 0xb47b45,
+  },
+  forest_rally: {
+    points: [[-70, -33], [-46, -63], [-15, -45], [12, -61], [51, -51], [73, -17], [49, 6], [64, 44], [28, 63], [-6, 42], [-43, 57], [-73, 21]],
+    width: 14, road: 0x454a40, line: 0xd9d3a5, sky: 0x91aa96, fog: 0x64796c, fogDensity: 0.0038, ground: 0x214832,
+    decoration: 'trees', decorationColor: 0x1d6638,
+  },
+  volcano_night: {
+    points: [[-72, -34], [-49, -61], [-13, -46], [12, -65], [46, -52], [72, -22], [48, 1], [68, 37], [35, 62], [4, 41], [-31, 60], [-69, 37], [-77, 6]],
+    width: 15, road: 0x332f35, line: 0xff8561, sky: 0x171a2c, fog: 0x3a2931, fogDensity: 0.0044, ground: 0x291f22,
+    decoration: 'cones', decorationColor: 0xf9735b,
+  },
 };
 
 export function getTrackLayout(trackId: string): TrackLayout {
