@@ -43,15 +43,17 @@ export interface ReplayFrame {
   speed: number;
 }
 
-export interface MultiplayerPlayer {
-  id: string;
+export interface LeaderboardEntry {
+  trackId: string;
+  playerName: string;
+  bestTime: number; // in seconds
+  date: string;
+  ghostFrames: ReplayFrame[];
+}
+
+export interface PlayerProfile {
   name: string;
-  carId: string;
-  color: string;
-  x: number;
-  y: number;
-  angle: number;
-  speed: number;
-  lap: number;
-  isReady: boolean;
+  level: number;
+  xp: number;
+  title: string;
 }

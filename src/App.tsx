@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Car, Track, Upgrade, ReplayFrame } from './types';
+import { Car, Track, Upgrade, ReplayFrame, LeaderboardEntry, PlayerProfile } from './types';
 import { INITIAL_CARS, INITIAL_TRACKS, INITIAL_UPGRADES } from './data/gameData';
 import { Navbar } from './components/Navbar';
 import { MainMenu } from './components/MainMenu';
@@ -13,6 +13,8 @@ import { MissionsPanel } from './components/MissionsPanel';
 import { NotificationToast } from './components/NotificationToast';
 import { SplashIntro } from './components/SplashIntro';
 import { MultiplayerLobby } from './components/MultiplayerLobby';
+import { PlayerProfileModal } from './components/PlayerProfileModal';
+import { LeaderboardModal } from './components/LeaderboardModal';
 import { soundManager } from './audio';
 
 interface Mission {
@@ -34,6 +36,16 @@ export default function App() {
     return saved ? parseInt(saved, 10) : 3;
   });
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
+  const [profile, setProfile] = useState<PlayerProfile>(() => {
+    const saved = localStorage.getItem('remocar_player_profile');
+    return saved ? JSON.parse(saved) : { name: 'المتسابق البطل', level: 1, xp: 120, title: 'متسابق مبتدئ' };
+  });
+
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => {
+    const saved = localStorage.getItem('remocar_leaderboard');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const [cars, setCars] = useState<Car[]>(() => {
     const saved = localStorage.getItem('remocar_cars');
@@ -62,9 +74,9 @@ export default function App() {
   });
 
   const [missions, setMissions] = useState<Mission[]>([
-    { id: 'm1', title: 'إكمال سباق 3D على المضامير الطويلة', reward: 200, completed: false },
-    { id: 'm2', title: 'جمع العملات الذهبية في الحلبة', reward: 200, completed: false },
-    { id: 'm3', title: 'تجربة اللعب الجماعي عبر Wi-Fi', reward: 300, completed: false },
+    { id: 'm1', title: 'إكمال سباق 3D بنجاح', reward: 200, completed: false },
+    { id: 'm2', title: 'تحطيم الرقم القياسي والتغلب على سيارة الشبح', reward: 350, completed: false },
+    { id: 'm3', title: 'رفع مستوى المتسابق في الملف الشخصي', reward: 300, completed: false },
   ]);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -73,6 +85,8 @@ export default function App() {
   const [isInstructionsOpen, setIsInstructionsOpen] = useState<boolean>(false);
   const [isMissionsOpen, setIsMissionsOpen] = useState<boolean>(false);
   const [isMultiplayerOpen, setIsMultiplayerOpen] = useState<boolean>(false);
+  const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
+  const [isLeaderboardOpen, setIsLeaderboardOpen] = useState<boolean>(false);
 
   // Save to localStorage
   useEffect(() => {
@@ -81,10 +95,12 @@ export default function App() {
     localStorage.setItem('remocar_cars', JSON.stringify(cars));
     localStorage.setItem('remocar_tracks', JSON.stringify(tracks));
     localStorage.setItem('remocar_upgrades', JSON.stringify(upgrades));
+    localStorage.setItem('remocar_player_profile', JSON.stringify(profile));
+    localStorage.setItem('remocar_leaderboard', JSON.stringify(leaderboard));
     if (replayFrames.length > 0) {
       localStorage.setItem('remocar_last_replay', JSON.stringify(replayFrames));
     }
-  }, [coins, trophies, cars, tracks, upgrades, replayFrames]);
+  }, [coins, trophies, cars, tracks, upgrades, profile, leaderboard, replayFrames]);
 
   const handleToggleSound = () => {
     const next = !soundEnabled;
@@ -132,24 +148,55 @@ export default function App() {
     setToastMessage(`أنجزت المهمة بنجاح وحصلت على +${reward} عملة!`);
   };
 
-  const handleFinishRace = (won: boolean, coinsEarned: number, frames: ReplayFrame[]) => {
-    const finalEarned = Math.round(coinsEarned * (selectedTrack?.rewardMultiplier || 1));
+  const handleFinishRace = (won: boolean, coinsEarned: number, frames: ReplayFrame[], lapTime: number) => {
+    const finalEarned = Math.round(coinsEarned * (selectedTrack?.rewardMultiplier || 1) * (1 + profile.level * 0.1));
     setCoins((c) => c + finalEarned);
+    
+    // Gain XP and check Level up
+    const newXp = profile.xp + 150;
+    let newLevel = profile.level;
+    let newTitle = profile.title;
+    if (newXp >= newLevel * 500) {
+      newLevel += 1;
+      if (newLevel >= 5) newTitle = 'أساطير السباقات المطلقة';
+      else if (newLevel >= 3) newTitle = 'متسابق محترف معتمد';
+      setToastMessage(`تهانينا! لقد ارتفعت إلى المستوى ${newLevel} وحصلت على ميزات خارقة!`);
+    }
+    setProfile({ ...profile, xp: newXp, level: newLevel, title: newTitle });
+
     if (won) {
       setTrophies((t) => t + 1);
       soundManager.playVictory();
     }
+
+    // Update Leaderboard & Ghost if better lap time
+    if (selectedTrack) {
+      const existingEntry = leaderboard.find((l) => l.trackId === selectedTrack.id);
+      if (!existingEntry || lapTime < existingEntry.bestTime) {
+        const newEntry: LeaderboardEntry = {
+          trackId: selectedTrack.id,
+          playerName: profile.name,
+          bestTime: lapTime,
+          date: new Date().toLocaleDateString(),
+          ghostFrames: frames,
+        };
+        setLeaderboard((prev) => [...prev.filter((l) => l.trackId !== selectedTrack.id), newEntry]);
+        setToastMessage(`رقم قياسي جديد في حلبة ${selectedTrack.name}! (${lapTime.toFixed(2)} ث)`);
+      }
+    }
+
     setReplayFrames(frames);
     setMissions((prev) =>
       prev.map((m) => (m.id === 'm1' ? { ...m, completed: true } : m))
     );
-    setToastMessage(`أنهيت السباق بنجاح وكسبت +${finalEarned} عملة ذهبية مع مكافأة المضمار!`);
     setScreen('menu');
   };
 
   if (showSplash) {
     return <SplashIntro onEnterGame={() => setShowSplash(false)} />;
   }
+
+  const currentTrackLeaderboard = selectedTrack ? leaderboard.find((l) => l.trackId === selectedTrack.id) : undefined;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-red-500 selection:text-white pb-12">
@@ -165,6 +212,8 @@ export default function App() {
         onNavigate={(s) => setScreen(s as any)}
         currentScreen={screen}
         onOpenSync={() => setIsSyncModalOpen(true)}
+        onOpenProfile={() => setIsProfileOpen(true)}
+        onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
       />
 
       {/* Main Content Screens */}
@@ -207,6 +256,8 @@ export default function App() {
           <GameCanvas
             car={selectedCar}
             track={selectedTrack}
+            profile={profile}
+            leaderboardEntry={currentTrackLeaderboard}
             isReplayMode={false}
             onFinishRace={handleFinishRace}
             onQuit={() => setScreen('tracks')}
@@ -217,6 +268,7 @@ export default function App() {
           <GameCanvas
             car={selectedCar}
             track={selectedTrack}
+            profile={profile}
             isReplayMode={true}
             replayFrames={replayFrames}
             onFinishRace={() => setScreen('menu')}
@@ -255,12 +307,26 @@ export default function App() {
         isOpen={isMultiplayerOpen}
         selectedCar={selectedCar}
         onClose={() => setIsMultiplayerOpen(false)}
-        onStartMultiplayerRace={(code, isHost) => {
+        onStartMultiplayerRace={(code) => {
           setIsMultiplayerOpen(false);
           setSelectedTrack(tracks[0]);
           setScreen('game');
           setToastMessage(`تم بدء السباق الجماعي عبر الشبكة المحلية (غرفة: ${code})!`);
         }}
+      />
+
+      <PlayerProfileModal
+        isOpen={isProfileOpen}
+        profile={profile}
+        onUpdateProfile={(newName) => setProfile({ ...profile, name: newName })}
+        onClose={() => setIsProfileOpen(false)}
+      />
+
+      <LeaderboardModal
+        isOpen={isLeaderboardOpen}
+        tracks={tracks}
+        leaderboard={leaderboard}
+        onClose={() => setIsLeaderboardOpen(false)}
       />
     </div>
   );
