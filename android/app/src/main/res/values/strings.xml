@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">REMOCAR 3D</string>
+    <string name="title_activity_main">REMOCAR 3D Racing</string>
+    <string name="package_name">com.mohammedalhzmi.remocar</string>
+</resources>

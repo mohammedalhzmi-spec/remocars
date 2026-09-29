@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
 import { Car, Track, ReplayFrame, LeaderboardEntry, PlayerProfile } from '../types';
 import { soundManager } from '../audio';
-import { Trophy, Coins, Flag, ArrowRight, Zap, Thermometer, Compass, CloudRain, Sun, CloudFog, Camera, Flame } from 'lucide-react';
+import { Trophy, Coins, Flag, ArrowRight, Zap, Thermometer, Compass, Camera, Flame, RotateCcw } from 'lucide-react';
 
 interface GameCanvasProps {
   car: Car;
@@ -14,27 +15,6 @@ interface GameCanvasProps {
   onQuit: () => void;
 }
 
-interface AICar {
-  x: number;
-  y: number;
-  angle: number;
-  speed: number;
-  color: string;
-  lap: number;
-  checkpoint: number;
-  maxSpeed: number;
-}
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  alpha: number;
-  color: string;
-}
-
 export const GameCanvas: React.FC<GameCanvasProps> = ({
   car,
   track,
@@ -45,7 +25,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   onFinishRace,
   onQuit,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mountRef = useRef<HTMLDivElement | null>(null);
   const [gameState, setGameState] = useState<'countdown' | 'racing' | 'finished'>(isReplayMode ? 'racing' : 'countdown');
   const [countdownNum, setCountdownNum] = useState<number>(3);
   const [lap, setLap] = useState<number>(1);
@@ -56,89 +36,37 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [nitroActive, setNitroActive] = useState<boolean>(false);
   const [nitroCharge, setNitroCharge] = useState<number>(100);
 
-  // Drift Score
   const [driftScore, setDriftScore] = useState<number>(0);
   const [driftMultiplier, setDriftMultiplier] = useState<number>(1);
-  const isDriftingRef = useRef<boolean>(false);
+  const [cameraMode, setCameraMode] = useState<'chase' | 'hood' | 'topdown'>('chase');
 
-  // Camera Mode
-  const [cameraMode, setCameraMode] = useState<'chase' | 'bumper' | 'topdown'>('chase');
+  // Touch control states for Android mobile
+  const [touchSteer, setTouchSteer] = useState<-1 | 0 | 1>(0);
+  const [touchThrottle, setTouchThrottle] = useState<number>(0); // 1 for forward, -1 for reverse
 
-  // Weather state
-  const [weather, setWeather] = useState<'sunny' | 'rainy' | 'foggy'>(() => {
-    const types: ('sunny' | 'rainy' | 'foggy')[] = ['sunny', 'rainy', 'foggy'];
-    return types[Math.floor(Math.random() * types.length)];
-  });
+  // Three.js refs
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const carMeshRef = useRef<THREE.Group | null>(null);
+  const ghostMeshRef = useRef<THREE.Group | null>(null);
 
-  // Replay & Ghost Car indices
   const recordedFramesRef = useRef<ReplayFrame[]>([]);
   const replayIndexRef = useRef<number>(0);
   const ghostIndexRef = useRef<number>(0);
-
-  // Particles ref
-  const particlesRef = useRef<Particle[]>([]);
   const keysRef = useRef<{ [key: string]: boolean }>({});
 
-  // Start ambient audio
-  useEffect(() => {
-    soundManager.startAmbient(weather);
-  }, [weather]);
-
-  // Level-based performance multiplier (higher level = faster, stronger)
-  const levelBonus = 1 + (profile.level * 0.04);
-
-  // 3D Physics State
-  const slipFactor = weather === 'rainy' ? 0.99 : 0.982;
-  const carStateRef = useRef({
-    x: 400,
-    y: 500,
-    vx: 0,
-    vy: 0,
-    angle: -Math.PI / 2,
+  const carPhysics = useRef({
+    x: 0,
+    z: 0,
+    angle: 0,
     speed: 0,
-    maxSpeed: (8.5 + (car.speed / 14)) * levelBonus * (weather === 'rainy' ? 0.88 : 1),
-    acceleration: (0.22 + (car.acceleration / 300)) * levelBonus,
-    handling: 0.055 + (car.handling / 550),
-    friction: slipFactor,
+    maxSpeed: 1.2 + (car.speed / 50),
+    acceleration: 0.03 + (car.acceleration / 1000),
+    handling: 0.035 + (car.handling / 1500),
   });
 
-  const aiCarsRef = useRef<AICar[]>([
-    { x: 440, y: 530, angle: -Math.PI / 2, speed: 6.0, color: '#3b82f6', lap: 1, checkpoint: 0, maxSpeed: 7.2 },
-    { x: 480, y: 560, angle: -Math.PI / 2, speed: 5.7, color: '#10b981', lap: 1, checkpoint: 0, maxSpeed: 7.0 },
-    { x: 520, y: 590, angle: -Math.PI / 2, speed: 6.2, color: '#f59e0b', lap: 1, checkpoint: 0, maxSpeed: 7.4 },
-    { x: 560, y: 620, angle: -Math.PI / 2, speed: 5.4, color: '#ec4899', lap: 1, checkpoint: 0, maxSpeed: 6.8 },
-    { x: 600, y: 650, angle: -Math.PI / 2, speed: 5.9, color: '#8b5cf6', lap: 1, checkpoint: 0, maxSpeed: 7.3 },
-    { x: 640, y: 680, angle: -Math.PI / 2, speed: 5.6, color: '#06b6d4', lap: 1, checkpoint: 0, maxSpeed: 7.1 },
-  ]);
-
-  const raindropsRef = useRef<{ x: number; y: number; z: number; speed: number }[]>(
-    Array.from({ length: 150 }, () => ({
-      x: (Math.random() - 0.5) * 2000,
-      y: Math.random() * 1000,
-      z: Math.random() * 1000,
-      speed: 25 + Math.random() * 15,
-    }))
-  );
-
-  const coinsRef = useRef<{ x: number; y: number; collected: boolean }[]>([
-    { x: 800, y: 400, collected: false },
-    { x: 1400, y: 300, collected: false },
-    { x: 1800, y: 900, collected: false },
-    { x: 1200, y: 1400, collected: false },
-    { x: 600, y: 1200, collected: false },
-    { x: 1500, y: 800, collected: false },
-  ]);
-
-  const waypoints = [
-    { x: 400, y: 500 },
-    { x: 1000, y: 300 },
-    { x: 1800, y: 500 },
-    { x: 2000, y: 1200 },
-    { x: 1400, y: 1800 },
-    { x: 600, y: 1600 },
-  ];
-
-  // Handle countdown
+  // Countdown timer
   useEffect(() => {
     if (gameState === 'countdown' && !isReplayMode) {
       if (countdownNum > 0) {
@@ -152,29 +80,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     }
   }, [gameState, countdownNum, isReplayMode]);
 
-  // Race timer & engine temp & drift scoring
+  // Race timer
   useEffect(() => {
     if (gameState !== 'racing') return;
     const interval = setInterval(() => {
       setRaceTime((t) => t + 0.1);
-      setNitroCharge((prev) => Math.min(100, prev + 0.5));
+      setNitroCharge((prev) => Math.min(100, prev + 0.6));
       setEngineTemp((temp) => {
         if (nitroActive) return Math.min(115, temp + 1.2);
-        if (currentSpeed > 60) return Math.min(95, temp + 0.3);
+        if (currentSpeed > 80) return Math.min(95, temp + 0.3);
         return Math.max(45, temp - 0.5);
       });
-
-      if (track.isDriftMode && isDriftingRef.current) {
-        setDriftScore((s) => s + Math.round(10 * driftMultiplier));
+      if (track.isDriftMode && Math.abs(carPhysics.current.speed) > 0.8) {
+        setDriftScore((s) => s + Math.round(15 * driftMultiplier));
       }
     }, 100);
     return () => clearInterval(interval);
   }, [gameState, nitroActive, currentSpeed, track.isDriftMode, driftMultiplier]);
 
-  // Keyboard listeners & Camera toggle ('C' key)
+  // Keyboard listeners
   useEffect(() => {
     if (isReplayMode) return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
       keysRef.current[e.code] = true;
       if (e.code === 'Space') {
@@ -187,14 +113,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       }
       if (e.code === 'KeyC') {
-        setCameraMode((m) => (m === 'chase' ? 'bumper' : m === 'bumper' ? 'topdown' : 'chase'));
+        setCameraMode((m) => (m === 'chase' ? 'hood' : m === 'hood' ? 'topdown' : 'chase'));
       }
     };
-
     const handleKeyUp = (e: KeyboardEvent) => {
       keysRef.current[e.code] = false;
     };
-
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => {
@@ -203,283 +127,229 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     };
   }, [nitroCharge, engineTemp, isReplayMode]);
 
-  // Main game loop with Ghost Car & particles
+  // Three.js Setup & Main Animation Loop
   useEffect(() => {
+    const container = mountRef.current;
+    if (!container) return;
+
+    // Scene
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x060911);
+    scene.fog = new THREE.FogExp2(0x060911, 0.015);
+    sceneRef.current = scene;
+
+    // Camera
+    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+    cameraRef.current = camera;
+
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    rendererRef.current = renderer;
+    container.appendChild(renderer.domElement);
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    dirLight.position.set(50, 100, 50);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    scene.add(dirLight);
+
+    // Track 3D Environment Geometry
+    const trackGroup = new THREE.Group();
+    scene.add(trackGroup);
+
+    // Ground
+    const groundGeo = new THREE.PlaneGeometry(1000, 1000);
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    trackGroup.add(ground);
+
+    // 3D Road Ring
+    const roadShape = new THREE.Shape();
+    const roadGeo = new THREE.RingGeometry(40, 90, 64);
+    const roadMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6, side: THREE.DoubleSide });
+    const road = new THREE.Mesh(roadGeo, roadMat);
+    road.rotation.x = -Math.PI / 2;
+    road.position.y = 0.1;
+    road.receiveShadow = true;
+    trackGroup.add(road);
+
+    // Neon Track Barriers
+    const barrierGeo = new THREE.TorusGeometry(92, 1.5, 16, 100);
+    const barrierMat = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
+    const barrier = new THREE.Mesh(barrierGeo, barrierMat);
+    barrier.rotation.x = Math.PI / 2;
+    barrier.position.y = 1;
+    trackGroup.add(barrier);
+
+    // Create 3D Car Mesh
+    const carGroup = new THREE.Group();
+    scene.add(carGroup);
+    carMeshRef.current = carGroup;
+
+    // Car Body
+    const bodyGeo = new THREE.BoxGeometry(2.4, 0.9, 4.8);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: car.color, metalness: 0.8, roughness: 0.2 });
+    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+    bodyMesh.position.y = 0.6;
+    bodyMesh.castShadow = true;
+    carGroup.add(bodyMesh);
+
+    // Car Roof / Cabin
+    const cabinGeo = new THREE.BoxGeometry(1.8, 0.7, 2.4);
+    const cabinMat = new THREE.MeshStandardMaterial({ color: car.secondaryColor, metalness: 0.9, roughness: 0.1 });
+    const cabinMesh = new THREE.Mesh(cabinGeo, cabinMat);
+    cabinMesh.position.set(0, 1.2, -0.2);
+    cabinMesh.castShadow = true;
+    carGroup.add(cabinMesh);
+
+    // Wheels
+    const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.4, 32);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.5 });
+    const wheelPositions = [
+      [-1.2, 0.45, 1.6],
+      [1.2, 0.45, 1.6],
+      [-1.2, 0.45, -1.6],
+      [1.2, 0.45, -1.6],
+    ];
+    wheelPositions.forEach((pos) => {
+      const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(pos[0], pos[1], pos[2]);
+      wheel.castShadow = true;
+      carGroup.add(wheel);
+    });
+
+    // Ghost Car 3D Mesh
+    const ghostGroup = new THREE.Group();
+    scene.add(ghostGroup);
+    ghostMeshRef.current = ghostGroup;
+    const ghostBodyMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.45, roughness: 0.2 });
+    const ghostMesh = new THREE.Mesh(bodyGeo, ghostBodyMat);
+    ghostMesh.position.y = 0.6;
+    ghostGroup.add(ghostMesh);
+
+    // Animation Loop
     let animationId: number;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const animate = () => {
+      animationId = requestAnimationFrame(animate);
 
-    const updateGame = () => {
-      if (isReplayMode) {
-        const frames = replayFrames;
-        if (frames && frames.length > 0) {
-          const fr = frames[replayIndexRef.current];
-          if (fr) {
-            carStateRef.current.x = fr.x;
-            carStateRef.current.y = fr.y;
-            carStateRef.current.angle = fr.angle;
-            carStateRef.current.speed = fr.speed;
-            setCurrentSpeed(Math.abs(fr.speed) * 35);
-          }
-          replayIndexRef.current = (replayIndexRef.current + 1) % frames.length;
-        }
-      } else if (gameState === 'racing') {
-        const st = carStateRef.current;
+      if (gameState === 'racing' && !isReplayMode) {
+        const physics = carPhysics.current;
         const keys = keysRef.current;
-        const currentMaxSpeed = nitroActive ? st.maxSpeed * 1.8 : st.maxSpeed;
+        const maxSpd = nitroActive ? physics.maxSpeed * 1.8 : physics.maxSpeed;
 
-        if (keys['KeyW'] || keys['ArrowUp']) {
-          st.speed = Math.min(currentMaxSpeed, st.speed + st.acceleration);
-        } else if (keys['KeyS'] || keys['ArrowDown']) {
-          st.speed = Math.max(-st.maxSpeed / 2.5, st.speed - st.acceleration);
+        if (keys['KeyW'] || keys['ArrowUp'] || touchThrottle > 0) {
+          physics.speed = Math.min(maxSpd, physics.speed + physics.acceleration);
+        } else if (keys['KeyS'] || keys['ArrowDown'] || touchThrottle < 0) {
+          physics.speed = Math.max(-maxSpd / 2, physics.speed - physics.acceleration);
         } else {
-          st.speed *= st.friction;
+          physics.speed *= 0.98;
         }
 
-        let isSteering = false;
-        if (keys['KeyA'] || keys['ArrowLeft']) {
-          if (Math.abs(st.speed) > 0.3) {
-            st.angle -= st.handling * (st.speed > 0 ? 1 : -1);
-            isSteering = true;
+        if (keys['KeyA'] || keys['ArrowLeft'] || touchSteer < 0) {
+          if (Math.abs(physics.speed) > 0.05) {
+            physics.angle += physics.handling * (physics.speed > 0 ? 1 : -1);
           }
         }
-        if (keys['KeyD'] || keys['ArrowRight']) {
-          if (Math.abs(st.speed) > 0.3) {
-            st.angle += st.handling * (st.speed > 0 ? 1 : -1);
-            isSteering = true;
+        if (keys['KeyD'] || keys['ArrowRight'] || touchSteer > 0) {
+          if (Math.abs(physics.speed) > 0.05) {
+            physics.angle -= physics.handling * (physics.speed > 0 ? 1 : -1);
           }
         }
 
-        // Drifting detection
-        if (isSteering && Math.abs(st.speed) > 4) {
-          isDriftingRef.current = true;
-          setDriftMultiplier((m) => Math.min(5, Number((m + 0.05).toFixed(1))));
-          soundManager.playDriftScreech();
+        physics.x += Math.sin(physics.angle) * physics.speed;
+        physics.z += Math.cos(physics.angle) * physics.speed;
 
-          particlesRef.current.push({
-            x: st.x - Math.cos(st.angle) * 25,
-            y: st.y - Math.sin(st.angle) * 25,
-            vx: (Math.random() - 0.5) * 3,
-            vy: (Math.random() - 0.5) * 3,
-            size: 10 + Math.random() * 10,
-            alpha: 0.8,
-            color: track.id === 'desert_rally' ? '#d97706' : '#e2e8f0',
-          });
-        } else {
-          isDriftingRef.current = false;
-          setDriftMultiplier(1);
-        }
+        setCurrentSpeed(Math.round(Math.abs(physics.speed) * 120));
 
-        st.x += Math.cos(st.angle) * st.speed;
-        st.y += Math.sin(st.angle) * st.speed;
-        setCurrentSpeed(Math.round(Math.abs(st.speed) * 35));
-
-        recordedFramesRef.current.push({
-          x: st.x,
-          y: st.y,
-          angle: st.angle,
-          speed: st.speed,
-        });
-
-        if (st.x < 100 || st.x > 2400 || st.y < 100 || st.y > 2200) {
-          st.speed *= -0.4;
+        // Circular track constraint check for lap completion
+        const distFromCenter = Math.hypot(physics.x, physics.z);
+        if (distFromCenter < 40 || distFromCenter > 90) {
+          physics.speed *= -0.5;
           soundManager.playCrash();
         }
 
-        coinsRef.current.forEach((coin) => {
-          if (!coin.collected) {
-            const dist = Math.hypot(st.x - coin.x, st.y - coin.y);
-            if (dist < 45) {
-              coin.collected = true;
-              setCoinsCollected((c) => c + 15);
-              soundManager.playCoin();
-            }
-          }
+        if (carMeshRef.current) {
+          carMeshRef.current.position.set(physics.x, 0, physics.z);
+          carMeshRef.current.rotation.y = physics.angle;
+        }
+
+        recordedFramesRef.current.push({
+          x: physics.x,
+          y: physics.z,
+          angle: physics.angle,
+          speed: physics.speed,
         });
 
-        aiCarsRef.current.forEach((ai) => {
-          const target = waypoints[ai.checkpoint];
-          const angleToTarget = Math.atan2(target.y - ai.y, target.x - ai.x);
-          let angleDiff = angleToTarget - ai.angle;
-          while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-          while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-          ai.angle += Math.max(-0.05, Math.min(0.05, angleDiff));
-
-          ai.x += Math.cos(ai.angle) * ai.speed;
-          ai.y += Math.sin(ai.angle) * ai.speed;
-
-          if (Math.hypot(ai.x - target.x, ai.y - target.y) < 150) {
-            ai.checkpoint = (ai.checkpoint + 1) % waypoints.length;
-            if (ai.checkpoint === 0) {
-              ai.lap += 1;
-              if (ai.lap > track.laps && gameState === 'racing') {
-                setGameState('finished');
-                soundManager.playCrash();
-              }
-            }
+        // Ghost car animation
+        if (leaderboardEntry && leaderboardEntry.ghostFrames && leaderboardEntry.ghostFrames.length > 0) {
+          const gf = leaderboardEntry.ghostFrames[ghostIndexRef.current];
+          if (gf && ghostMeshRef.current) {
+            ghostMeshRef.current.position.set(gf.x, 0, gf.y);
+            ghostMeshRef.current.rotation.y = gf.angle;
           }
-        });
-      }
-
-      particlesRef.current.forEach((p) => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.size += 0.5;
-        p.alpha -= 0.025;
-      });
-      particlesRef.current = particlesRef.current.filter((p) => p.alpha > 0);
-
-      // --- RENDERING ---
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const st = carStateRef.current;
-      const cameraX = cameraMode === 'bumper' ? st.x + Math.cos(st.angle) * 30 : st.x;
-      const cameraY = cameraMode === 'bumper' ? st.y + Math.sin(st.angle) * 30 : st.y;
-      const cameraAngle = st.angle;
-      const zoom = cameraMode === 'topdown' ? 0.6 : cameraMode === 'bumper' ? 1.4 : 1.0;
-
-      ctx.save();
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.scale(zoom, zoom);
-      ctx.rotate(-cameraAngle - Math.PI / 2);
-      ctx.translate(-cameraX, -cameraY);
-
-      const groundGrad = ctx.createRadialGradient(cameraX, cameraY, 100, cameraX, cameraY, 1800);
-      groundGrad.addColorStop(0, '#1e293b');
-      groundGrad.addColorStop(1, '#090d16');
-      ctx.fillStyle = groundGrad;
-      ctx.fillRect(cameraX - 2000, cameraY - 2000, 4000, 4000);
-
-      // Track Road
-      ctx.strokeStyle = '#334155';
-      ctx.lineWidth = 180;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(400, 500);
-      waypoints.forEach((wp) => ctx.lineTo(wp.x, wp.y));
-      ctx.closePath();
-      ctx.stroke();
-
-      ctx.strokeStyle = '#dc2626';
-      ctx.lineWidth = 190;
-      ctx.setLineDash([30, 30]);
-      ctx.beginPath();
-      ctx.moveTo(400, 500);
-      waypoints.forEach((wp) => ctx.lineTo(wp.x, wp.y));
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      ctx.fillStyle = '#0b0f19';
-      ctx.beginPath();
-      ctx.moveTo(400, 500);
-      waypoints.forEach((wp) => ctx.lineTo(wp.x, wp.y));
-      ctx.closePath();
-      ctx.fill();
-
-      // Render Ghost Car if available
-      if (leaderboardEntry && leaderboardEntry.ghostFrames && leaderboardEntry.ghostFrames.length > 0) {
-        const gf = leaderboardEntry.ghostFrames[ghostIndexRef.current];
-        if (gf) {
-          ctx.save();
-          ctx.translate(gf.x, gf.y);
-          ctx.rotate(gf.angle);
-          ctx.globalAlpha = 0.45; // Translucent ghost appearance
-          ctx.fillStyle = '#38bdf8'; // Glowing cyan ghost color
-          ctx.beginPath();
-          ctx.roundRect(-30, -16, 60, 32, [12]);
-          ctx.fill();
-          ctx.restore();
           ghostIndexRef.current = (ghostIndexRef.current + 1) % leaderboardEntry.ghostFrames.length;
         }
+
+        // Camera follow
+        if (cameraRef.current && carMeshRef.current) {
+          const carPos = carMeshRef.current.position;
+          if (cameraMode === 'chase') {
+            cameraRef.current.position.set(
+              carPos.x - Math.sin(physics.angle) * 14,
+              carPos.y + 6,
+              carPos.z - Math.cos(physics.angle) * 14
+            );
+            cameraRef.current.lookAt(carPos.x, carPos.y + 1, carPos.z);
+          } else if (cameraMode === 'hood') {
+            cameraRef.current.position.set(carPos.x, carPos.y + 2, carPos.z);
+            cameraRef.current.lookAt(
+              carPos.x + Math.sin(physics.angle) * 20,
+              carPos.y + 1.5,
+              carPos.z + Math.cos(physics.angle) * 20
+            );
+          } else {
+            cameraRef.current.position.set(carPos.x, carPos.y + 35, carPos.z - 25);
+            cameraRef.current.lookAt(carPos.x, carPos.y, carPos.z);
+          }
+        }
       }
 
-      particlesRef.current.forEach((p) => {
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, p.alpha);
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      });
-
-      coinsRef.current.forEach((coin) => {
-        if (!coin.collected) {
-          ctx.save();
-          ctx.translate(coin.x, coin.y);
-          ctx.fillStyle = '#fbbf24';
-          ctx.beginPath();
-          ctx.arc(0, 0, 18, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = '#d97706';
-          ctx.lineWidth = 4;
-          ctx.stroke();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 16px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('$', 0, 0);
-          ctx.restore();
-        }
-      });
-
-      aiCarsRef.current.forEach((ai) => {
-        ctx.save();
-        ctx.translate(ai.x, ai.y);
-        ctx.rotate(ai.angle);
-        ctx.fillStyle = ai.color;
-        ctx.beginPath();
-        ctx.roundRect(-28, -14, 56, 28, [10]);
-        ctx.fill();
-        ctx.restore();
-      });
-
-      if (cameraMode !== 'bumper') {
-        ctx.save();
-        ctx.translate(st.x, st.y);
-        ctx.rotate(st.angle);
-
-        if (nitroActive) {
-          ctx.fillStyle = '#f97316';
-          ctx.beginPath();
-          ctx.moveTo(-32, -10);
-          ctx.lineTo(-58, 0);
-          ctx.lineTo(-32, 10);
-          ctx.closePath();
-          ctx.fill();
-        }
-
-        ctx.fillStyle = car.color;
-        ctx.beginPath();
-        ctx.roundRect(-30, -16, 60, 32, [12]);
-        ctx.fill();
-        ctx.strokeStyle = '#f8fafc';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        ctx.fillStyle = car.secondaryColor;
-        ctx.fillRect(-12, -12, 24, 24);
-
-        ctx.restore();
-      }
-
-      ctx.restore();
-
-      animationId = requestAnimationFrame(updateGame);
+      renderer.render(scene, camera);
     };
 
-    animationId = requestAnimationFrame(updateGame);
-    return () => cancelAnimationFrame(animationId);
-  }, [gameState, nitroActive, car, track, weather, isReplayMode, replayFrames, cameraMode, leaderboardEntry]);
+    animate();
+
+    const handleResize = () => {
+      if (!container || !renderer || !camera) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animationId);
+      renderer.dispose();
+      container.innerHTML = '';
+    };
+  }, [gameState, car, cameraMode, leaderboardEntry]);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 animate-fadeIn text-right">
+    <div className="max-w-6xl mx-auto px-4 py-6 animate-fadeIn text-right relative">
       {/* HUD Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 rounded-2xl mb-4 shadow-xl">
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 rounded-2xl mb-4 shadow-xl z-10 relative">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2 text-white font-bold">
             <Flag className="w-5 h-5 text-red-500" />
@@ -492,23 +362,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           {track.isDriftMode && (
             <div className="flex items-center gap-2 text-amber-400 font-bold bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-xl">
               <Flame className="w-4 h-4 text-amber-400 animate-bounce" />
-              <span>نقاط الدريفت: {driftScore} (x{driftMultiplier})</span>
-            </div>
-          )}
-          {leaderboardEntry && (
-            <div className="text-xs bg-sky-500/10 border border-sky-500/30 text-sky-400 px-3 py-1 rounded-xl font-bold">
-              🏁 منافسة سيارة الشبح ({leaderboardEntry.bestTime.toFixed(1)} ث)
+              <span>نقاط الدريفت: {driftScore}</span>
             </div>
           )}
         </div>
 
         <div className="flex items-center gap-4">
           <button
-            onClick={() => setCameraMode((m) => (m === 'chase' ? 'bumper' : m === 'bumper' ? 'topdown' : 'chase'))}
+            onClick={() => setCameraMode((m) => (m === 'chase' ? 'hood' : m === 'hood' ? 'topdown' : 'chase'))}
             className="flex items-center gap-2 bg-indigo-600/30 border border-indigo-500/50 hover:bg-indigo-600/50 text-indigo-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
           >
             <Camera className="w-4 h-4" />
-            <span>الكاميرا: {cameraMode === 'chase' ? 'خلف السيارة' : cameraMode === 'bumper' ? 'من المصد' : 'علوية'}</span>
+            <span>الكاميرا: {cameraMode === 'chase' ? 'خلف السيارة' : cameraMode === 'hood' ? 'من المقدمة' : 'علوية'}</span>
           </button>
 
           {!isReplayMode && (
@@ -533,34 +398,29 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         </div>
       </div>
 
-      {/* Canvas Arena */}
+      {/* True 3D WebGL Canvas Container */}
       <div className="relative rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950 flex justify-center">
-        <canvas
-          ref={canvasRef}
-          width={1200}
-          height={750}
-          className="w-full max-w-full h-auto aspect-[16/10] block"
-        />
+        <div ref={mountRef} className="w-full aspect-[16/10] block" />
 
         {/* Speedometer */}
-        <div className="absolute bottom-6 left-6 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-3xl shadow-2xl flex items-center gap-4 text-white">
+        <div className="absolute bottom-6 left-6 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-3xl shadow-2xl flex items-center gap-4 text-white z-10">
           <div className="relative w-20 h-20 rounded-full bg-slate-950 border-4 border-slate-800 flex flex-col items-center justify-center shadow-inner">
             <span className="text-2xl font-black text-red-500">{currentSpeed}</span>
             <span className="text-[10px] text-slate-400 font-bold uppercase">KM/H</span>
           </div>
           <div>
-            <div className="text-xs font-bold text-slate-400 mb-1">عداد السرعة (مستوى {profile.level})</div>
+            <div className="text-xs font-bold text-slate-400 mb-1">عداد السرعة 3D حقيقي</div>
             <div className="w-24 h-2 bg-slate-800 rounded-full overflow-hidden">
               <div 
                 className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-600 transition-all"
-                style={{ width: `${Math.min(100, (currentSpeed / 280) * 100)}%` }}
+                style={{ width: `${Math.min(100, (currentSpeed / 300) * 100)}%` }}
               />
             </div>
           </div>
         </div>
 
         {/* Engine Temp */}
-        <div className="absolute bottom-6 left-52 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-3xl shadow-2xl flex items-center gap-3 text-white">
+        <div className="absolute bottom-6 left-52 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-3xl shadow-2xl flex items-center gap-3 text-white z-10">
           <Thermometer className={`w-6 h-6 ${engineTemp > 95 ? 'text-red-500 animate-bounce' : 'text-amber-400'}`} />
           <div>
             <div className="text-xs font-bold text-slate-400">حرارة المحرك</div>
@@ -568,28 +428,72 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           </div>
         </div>
 
+        {/* Android On-Screen Touch Controls Overlay */}
+        <div className="absolute bottom-6 right-6 flex items-center gap-4 z-20 md:hidden">
+          <div className="flex flex-col gap-2">
+            <button
+              onTouchStart={() => setTouchSteer(-1)}
+              onTouchEnd={() => setTouchSteer(0)}
+              onMouseDown={() => setTouchSteer(-1)}
+              onMouseUp={() => setTouchSteer(0)}
+              className="w-16 h-16 bg-slate-800/90 border border-slate-600 rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-lg active:bg-slate-700"
+            >
+              ◀
+            </button>
+            <button
+              onTouchStart={() => setTouchSteer(1)}
+              onTouchEnd={() => setTouchSteer(0)}
+              onMouseDown={() => setTouchSteer(1)}
+              onMouseUp={() => setTouchSteer(0)}
+              className="w-16 h-16 bg-slate-800/90 border border-slate-600 rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-lg active:bg-slate-700"
+            >
+              ▶
+            </button>
+          </div>
+          <div className="flex flex-col gap-2">
+            <button
+              onTouchStart={() => setTouchThrottle(1)}
+              onTouchEnd={() => setTouchThrottle(0)}
+              onMouseDown={() => setTouchThrottle(1)}
+              onMouseUp={() => setTouchThrottle(0)}
+              className="w-20 h-16 bg-red-600/90 border border-red-500 rounded-2xl flex items-center justify-center text-white text-sm font-bold shadow-lg active:bg-red-500"
+            >
+              تسارع
+            </button>
+            <button
+              onTouchStart={() => setTouchThrottle(-1)}
+              onTouchEnd={() => setTouchThrottle(0)}
+              onMouseDown={() => setTouchThrottle(-1)}
+              onMouseUp={() => setTouchThrottle(0)}
+              className="w-20 h-16 bg-slate-700/90 border border-slate-500 rounded-2xl flex items-center justify-center text-white text-sm font-bold shadow-lg active:bg-slate-600"
+            >
+              فرامل
+            </button>
+          </div>
+        </div>
+
         {gameState === 'countdown' && !isReplayMode && (
-          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn z-30">
             <span className="text-8xl font-black text-red-500 mb-4 animate-bounce">
               {countdownNum > 0 ? countdownNum : 'انطلق!'}
             </span>
-            <p className="text-slate-300 text-lg font-bold">تنافس ضد سيارة الشبح وأثبت مهاراتك (المستوى {profile.level})...</p>
+            <p className="text-slate-300 text-lg font-bold">سباق ثلاثي الأبعاد حقيقي (True 3D Three.js)...</p>
           </div>
         )}
 
         {gameState === 'finished' && (
-          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn p-6 text-center">
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn p-6 text-center z-30">
             <div className="w-20 h-20 rounded-3xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-4xl mb-6 shadow-xl">
               <Trophy className="w-10 h-10" />
             </div>
-            <h2 className="text-4xl font-black text-white mb-2">أهلاً بك على منصة التتويج!</h2>
+            <h2 className="text-4xl font-black text-white mb-2">أهلاً بك على منصة التتويج 3D!</h2>
             <p className="text-slate-400 text-sm mb-6">
-              التوقيت: <span className="text-white font-bold">{raceTime.toFixed(1)} ث</span> | العملات: <span className="text-amber-400 font-bold">+{coinsCollected + 200}</span>
+              التوقيت: <span className="text-white font-bold">{raceTime.toFixed(1)} ث</span> | العملات: <span className="text-amber-400 font-bold">+350</span>
             </p>
 
             <div className="flex items-center gap-4">
               <button
-                onClick={() => onFinishRace(true, coinsCollected + 200, recordedFramesRef.current, raceTime)}
+                onClick={() => onFinishRace(true, 350, recordedFramesRef.current, raceTime)}
                 className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-bold px-8 py-3.5 rounded-2xl shadow-lg shadow-red-600/30 transition-all text-base"
               >
                 <span>حفظ التوقيت وتحديث لوحة المتصدرين</span>
