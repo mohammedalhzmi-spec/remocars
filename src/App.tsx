@@ -320,14 +320,17 @@ export default function App() {
   }
 
   const currentTrackLeaderboard = selectedTrack ? leaderboard.find((l) => l.trackId === selectedTrack.id) : undefined;
+  const isImmersiveGame = screen === 'game' || screen === 'replay';
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-red-500 selection:text-white pb-12">
+    <div className={isImmersiveGame
+      ? 'fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden bg-slate-950 text-slate-100 font-sans selection:bg-red-500 selection:text-white'
+      : 'min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-red-500 selection:text-white pb-12'}>
       {/* Daily Reward Modal on App Load */}
       <DailyRewardModal onClaimReward={handleClaimDailyReward} />
 
       {/* Navbar */}
-      <Navbar
+      {!isImmersiveGame && <Navbar
         coins={coins}
         trophies={trophies}
         profileLevel={profile.level}
@@ -339,10 +342,10 @@ export default function App() {
         onOpenSync={() => setIsSyncModalOpen(true)}
         onOpenProfile={() => setIsProfileOpen(true)}
         onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
-      />
+      />}
 
       {/* Main Content Screens */}
-      <main className="pt-4">
+      <main className={isImmersiveGame ? 'h-full w-full overflow-hidden pt-0' : 'pt-4'}>
         {screen === 'menu' && (
           <MainMenu
             selectedCar={selectedCar}
@@ -392,7 +395,7 @@ export default function App() {
         )}
 
         {screen === 'game' && selectedTrack && (
-          <React.Suspense fallback={<div className="min-h-[70vh] grid place-items-center text-amber-300">جارٍ تحميل محرك السباق ثلاثي الأبعاد…</div>}>
+          <React.Suspense fallback={<div className="grid h-full min-h-0 place-items-center text-amber-300">جارٍ تحميل محرك السباق ثلاثي الأبعاد…</div>}>
             <GameCanvas
               key={isMultiplayerRoom ? `lan-round-${multiplayerRaceKey}` : `solo-${selectedTrack.id}`}
               car={selectedCar}
@@ -420,7 +423,7 @@ export default function App() {
         )}
 
         {screen === 'replay' && selectedTrack && (
-          <React.Suspense fallback={<div className="min-h-[70vh] grid place-items-center text-amber-300">جارٍ تحميل إعادة السباق…</div>}>
+          <React.Suspense fallback={<div className="grid h-full min-h-0 place-items-center text-amber-300">جارٍ تحميل إعادة السباق…</div>}>
             <GameCanvas
               car={selectedCar}
               track={selectedTrack}

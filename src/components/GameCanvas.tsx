@@ -371,8 +371,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     scene.fog = new THREE.Fog(layout.fog, layout.fogDensity);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(62, Math.max(1, container.clientWidth) / Math.max(1, container.clientHeight), 0.1, 1200);
-    camera.position.set(0, 7, -15);
+    const camera = new THREE.PerspectiveCamera(68, Math.max(1, container.clientWidth) / Math.max(1, container.clientHeight), 0.1, 1200);
+    camera.position.set(0, 5.5, -20);
     scene.add(camera);
     cameraRef.current = camera;
     const cockpitRig = createCockpitModel();
@@ -837,9 +837,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         cockpitRig.group.visible = cameraModeRef.current === 'cockpit';
         const cameraBlend = cameraFollowBlend(dt);
         if (cameraModeRef.current === 'chase') {
-          cameraTarget.set(p.x - Math.sin(physics.heading) * 9.5, 3.7, p.z - Math.cos(physics.heading) * 9.5);
+          cameraTarget.set(p.x - Math.sin(physics.heading) * 13.5, 5.2, p.z - Math.cos(physics.heading) * 13.5);
           camera.position.lerp(cameraTarget, cameraBlend);
-          camera.lookAt(p.x + Math.sin(physics.heading) * 7, 1.1, p.z + Math.cos(physics.heading) * 7);
+          camera.lookAt(p.x + Math.sin(physics.heading) * 5.5, 1.05, p.z + Math.cos(physics.heading) * 5.5);
         } else if (cameraModeRef.current === 'hood') {
           cameraTarget.set(p.x + Math.sin(physics.heading) * 1.5, 2.3, p.z + Math.cos(physics.heading) * 1.5);
           camera.position.lerp(cameraTarget, cameraBlend);
@@ -908,8 +908,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 animate-fadeIn text-right relative">
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 rounded-2xl mb-4 shadow-xl z-10 relative">
+    <div className="flex h-full min-h-0 w-full max-w-none flex-col gap-2 p-2 sm:p-3 animate-fadeIn text-right relative">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-slate-900/90 border border-slate-800 p-2 sm:p-3 rounded-2xl shadow-xl z-10 relative">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 text-white font-bold"><Flag className="w-5 h-5 text-red-500" /><span>اللفة: {Math.min(lap, track.laps)} / {track.laps}</span></div>
           <div className="flex items-center gap-2 text-white font-bold"><Coins className="w-5 h-5 text-amber-400" /><span>العملات: {coinsCollected}</span></div>
@@ -923,8 +923,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         </div>
       </div>
 
-      <div className="relative rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
-        <div ref={mountRef} className="w-full h-[min(68vh,680px)] min-h-[360px] touch-none" aria-label={`سباق ثلاثي الأبعاد - ${track.name}`} />
+      <div className="relative min-h-0 flex-1 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
+        <div ref={mountRef} className="absolute inset-0 h-full w-full touch-none" aria-label={`سباق ثلاثي الأبعاد - ${track.name}`} />
         <div className="absolute top-4 left-4 z-10 rounded-2xl border border-white/10 bg-slate-950/80 p-2.5 shadow-xl backdrop-blur" aria-label="خريطة مصغرة للمضمار">
           <svg viewBox="0 0 100 70" className="h-16 w-24 md:h-20 md:w-28" role="img" aria-label={`خريطة ${track.name}`}>
             <polyline points={minimapPoints.join(' ')} fill="none" stroke="#64748b" strokeWidth="10" strokeLinejoin="round" strokeLinecap="round" />
