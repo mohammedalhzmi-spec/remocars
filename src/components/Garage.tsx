@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Car, CarCustomization, Upgrade } from '../types';
 import { Wrench, Sparkles, Check, ShoppingBag, Zap, Shield, Gauge } from 'lucide-react';
 import { soundManager } from '../audio';
+import { VehicleArtwork } from './VehicleArtwork';
 const CarShowroom = React.lazy(() => import('./CarShowroom').then((module) => ({ default: module.CarShowroom })));
 
 interface GarageProps {
@@ -31,6 +32,8 @@ export const Garage: React.FC<GarageProps> = ({
   const [uploadMessage, setUploadMessage] = useState('');
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const customization: CarCustomization = { pattern: 'solid', plateText: 'ريم 2026', ...selectedCar.customization };
+  const chassisLevel = Math.max(1, upgrades.find((upgrade) => upgrade.id === 'body')?.level ?? 1);
+  const collisionDurability = Math.min(12, 3 + Math.floor(Math.max(0, playerLevel - 1) / 3) + Math.floor((chassisLevel - 1) / 2));
 
   const updateCustomization = (patch: Partial<CarCustomization>, paint?: { color?: string; secondaryColor?: string }) => {
     onCustomizeCar({
@@ -72,7 +75,7 @@ export const Garage: React.FC<GarageProps> = ({
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
           <h2 className="text-3xl font-black text-white mb-2">مرآب السيارات والتطوير</h2>
-          <p className="text-slate-400 text-sm">اختر سيارتك المفضلة أو قم بترقية قطع الغيار لمضاعفة فرص الفوز. مستواك الحالي: {playerLevel}</p>
+          <p className="text-slate-400 text-sm">اختر سيارتك أو طوّر الأداء. المستوى {playerLevel} يمنحك تحمّلاً يصل إلى {collisionDurability} صدمات؛ ترقيات الهيكل والإطارات والمحرك والنيترو تعمل داخل السباق.</p>
         </div>
 
         {/* Tabs */}
@@ -183,8 +186,9 @@ export const Garage: React.FC<GarageProps> = ({
                 )}
 
                 <div>
-                  <div className="text-6xl text-center py-6 group-hover:scale-110 transition-transform duration-300">
-                    {car.imageIcon}
+                  <div className="relative -mx-3 -mt-3 mb-4 flex h-36 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-b from-slate-800/80 to-slate-950/70 p-2 group-hover:brightness-110 transition-all duration-300">
+                    <div className="absolute inset-x-8 bottom-4 h-4 rounded-full bg-black/50 blur-md" />
+                    <VehicleArtwork car={car} className="relative z-10 h-full w-full drop-shadow-xl" />
                   </div>
                   <h3 className="text-xl font-bold text-white mb-1">{car.name}</h3>
                   <p className="text-xs text-slate-400 mb-6 h-10">{car.description}</p>

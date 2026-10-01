@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, Trophy, Coins, Github, Wrench, Flag, Home, User, Medal, Star } from 'lucide-react';
+import { Volume2, VolumeX, Trophy, Coins, Github, Wrench, Flag, Home, User, Medal, Star, Settings } from 'lucide-react';
 import gameIcon from '../assets/images/remocar_game_icon.webp';
 
 interface NavbarProps {
@@ -14,6 +14,7 @@ interface NavbarProps {
   onOpenSync: () => void;
   onOpenProfile: () => void;
   onOpenLeaderboard: () => void;
+  onOpenSettings: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -28,6 +29,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSync,
   onOpenProfile,
   onOpenLeaderboard,
+  onOpenSettings,
 }) => {
   return (
     <header className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 text-white sticky top-0 z-50 px-4 py-3 shadow-xl">
@@ -121,8 +123,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onToggleSound}
             className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+            aria-label={soundEnabled ? 'كتم الصوت' : 'تشغيل الصوت'}
           >
             {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4 text-red-400" />}
+          </button>
+
+          <button
+            onClick={onOpenSettings}
+            className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+            aria-label="إعدادات اللعبة"
+            title="إعدادات القيادة والرسوم"
+          >
+            <Settings className="w-4 h-4 text-cyan-300" />
           </button>
 
           {/* GitHub Sync Button */}

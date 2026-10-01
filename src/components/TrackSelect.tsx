@@ -1,6 +1,6 @@
 import React from 'react';
 import { Track } from '../types';
-import { Flag, Play, Lock, Trophy, Timer } from 'lucide-react';
+import { Flag, Play, Lock, Trophy, Timer, Zap } from 'lucide-react';
 import { soundManager } from '../audio';
 
 interface TrackSelectProps {
@@ -45,13 +45,16 @@ export const TrackSelect: React.FC<TrackSelectProps> = ({
               <div className="relative z-10 flex flex-col justify-between h-full">
                 <div className="flex items-start justify-between mb-6">
                   <div>
-                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold mb-3 ${
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
                       track.difficulty === 'سهل' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
                       track.difficulty === 'متوسط' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
                       'bg-red-500/20 text-red-300 border border-red-500/30'
                     }`}>
                       الصعوبة: {track.difficulty}
                     </span>
+                    {track.isStuntTrack && <span className="inline-flex items-center gap-1 rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-200"><Zap className="h-3.5 w-3.5" />قفزات واستعراض</span>}
+                    </div>
                     <h3 className="text-2xl font-black text-white mb-2">{track.name}</h3>
                   </div>
                   <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-white text-2xl shadow-lg">

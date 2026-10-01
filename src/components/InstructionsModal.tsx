@@ -62,6 +62,13 @@ export const InstructionsModal: React.FC<InstructionsModalProps> = ({ isOpen, on
             <span>تفعيل نيترو السرعة القصوى (Nitro)</span>
             <kbd className="px-4 py-1.5 bg-red-600/30 border border-red-500/50 rounded-lg text-xs font-mono text-red-300 font-bold">Space (المسافة)</kbd>
           </div>
+
+          <div className="rounded-2xl border border-cyan-500/20 bg-cyan-950/30 p-4 text-xs leading-6 text-cyan-100">
+            على الهاتف: المقود وزرا الانعطاف في يسار الشاشة، ودواستا التسارع والفرامل والنيترو في يمينها. يمكن تبديل المقود إلى إمالة الهاتف من الإعدادات. في مضامير الاستعراض، اضغط <kbd className="rounded border border-cyan-400/30 bg-slate-950 px-1.5 py-0.5 font-mono">E</kbd> أو زر «استعراض» أثناء القفز لتنفيذ لفة هوائية.
+          </div>
+          <div className="rounded-2xl border border-sky-400/20 bg-sky-950/30 p-4 text-xs leading-6 text-sky-100">
+            <strong className="text-sky-200">ميزة REMOCAR الخاصة — صدى الزمن:</strong> بعد إنهاء لفتك الأولى يظهر ظلّ شبحي لمسارك. حاول أن تتزامن معه عند بوابات النور الثلاث؛ عند شحن المؤشر بالكامل تحصل على اندفاع زمني محاط بهالة زرقاء ومكافأة عملات.
+          </div>
         </div>
 
         <button

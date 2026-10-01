@@ -20,12 +20,15 @@ export interface LevelMilestone {
 
 export const LEVEL_MILESTONES: LevelMilestone[] = [
   { level: 2, unlockTrackId: 'city_ring', description: 'حلبة المدينة الحديثة' },
-  { level: 3, unlockCarId: 'remocar_lumen_gt', description: 'شراء سيارة REMOCAR Lumen GT' },
+  { level: 3, unlockTrackId: 'desert_stunt_dunes', unlockCarId: 'remocar_lumen_gt', description: 'كثبان السراب وسيارة REMOCAR Lumen GT' },
+  { level: 4, unlockTrackId: 'city_sky_bridge', unlockCarId: 'remocar_ember_gt', description: 'جسر السحاب وسيارة REMOCAR Ember GT' },
   { level: 4, unlockTrackId: 'desert_canyon', description: 'طريق الأخاديد الصحراوية' },
   { level: 5, unlockCarId: 'remocar_drift_neo', description: 'مرشدة السباق دانا وسيارة REMOCAR Drift Neo مجانية' },
+  { level: 6, unlockTrackId: 'canyon_stunt_circuit', unlockCarId: 'remocar_solstice_x', description: 'وادي الصدى وسيارة REMOCAR Solstice X' },
   { level: 6, unlockTrackId: 'forest_rally', description: 'مضمار الرالي الحرجي' },
-  { level: 8, unlockTrackId: 'volcano_night', description: 'حلبة بركان منتصف الليل وشراء Vortex RS' },
-  { level: 10, description: 'مرشدة الأبطال ريم ومكافأة البطل' },
+  { level: 8, unlockTrackId: 'volcano_night', unlockCarId: 'remocar_borealis_rs', description: 'حلبة البركان وسيارة REMOCAR Borealis RS' },
+  { level: 8, unlockTrackId: 'neon_stadium_loop', description: 'حلبة النيون الكبرى' },
+  { level: 10, unlockCarId: 'remocar_titan_trail', description: 'مرشدة الأبطال ريم وسيارة REMOCAR Titan Trail' },
   { level: 15, description: 'مرشدة الجائزة الكبرى ليان ولقب أسطورة REMOCAR' },
 ];
 

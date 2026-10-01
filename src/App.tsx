@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Car, Track, Upgrade, ReplayFrame, LeaderboardEntry, PlayerProfile } from './types';
+import { Car, Track, Upgrade, ReplayFrame, LeaderboardEntry, PlayerProfile, GamePreferences } from './types';
 import { INITIAL_CARS, INITIAL_TRACKS, INITIAL_UPGRADES } from './data/gameData';
 import { MULTIPLAYER_TRACKS } from './data/multiplayerTracks';
 import { Navbar } from './components/Navbar';
@@ -15,6 +15,8 @@ import { SplashIntro } from './components/SplashIntro';
 import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { PlayerProfileModal } from './components/PlayerProfileModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
+import { SettingsModal } from './components/SettingsModal';
+import { CareerEventsModal } from './components/CareerEventsModal';
 import { soundManager } from './audio';
 import { lanMultiplayer } from './app/lanMultiplayer';
 import { getLevelBenefits, getLevelFromXp, getLevelReward, getLevelTitle, LEVEL_MILESTONES } from './data/progression';
@@ -22,6 +24,8 @@ import { getSelectedCoach } from './data/raceCoaches';
 import { playCoachIntroduction, playWinnerAnnouncement } from './app/coachAudio';
 import { LanTournamentResult } from './app/lanMultiplayer';
 import { stopAndroidLanHost } from './app/nativeLanHost';
+import { readGamePreferences } from './app/gamePreferences';
+import { CAREER_EVENTS } from './data/careerEvents';
 
 const GameCanvas = React.lazy(() => import('./components/GameCanvas').then((module) => ({ default: module.GameCanvas })));
 
@@ -44,6 +48,20 @@ export default function App() {
     return saved ? parseInt(saved, 10) : 3;
   });
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [preferences, setPreferences] = useState<GamePreferences>(() => readGamePreferences());
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCareerEventsOpen, setIsCareerEventsOpen] = useState(false);
+  const [completedCareerEventIds, setCompletedCareerEventIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('remocar_completed_career_events');
+      const parsed: unknown = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const [activeCareerEvent, setActiveCareerEvent] = useState<{ id: string; round: number } | null>(null);
+  const [soloRaceKey, setSoloRaceKey] = useState(0);
 
   const [profile, setProfile] = useState<PlayerProfile>(() => {
     const saved = localStorage.getItem('remocar_player_profile');
@@ -103,7 +121,22 @@ export default function App() {
 
   const [upgrades, setUpgrades] = useState<Upgrade[]>(() => {
     const saved = localStorage.getItem('remocar_upgrades');
-    return saved ? JSON.parse(saved) : INITIAL_UPGRADES;
+    if (!saved) return INITIAL_UPGRADES.map((upgrade) => ({ ...upgrade }));
+    try {
+      const parsed: unknown = JSON.parse(saved);
+      const savedUpgrades = Array.isArray(parsed) ? parsed as Upgrade[] : [];
+      return INITIAL_UPGRADES.map((upgrade) => {
+        const previous = savedUpgrades.find((entry) => entry.id === upgrade.id);
+        if (!previous) return { ...upgrade };
+        return {
+          ...upgrade,
+          level: Math.max(1, Math.min(upgrade.maxLevel, Math.floor(Number(previous.level) || 1))),
+          cost: Math.max(upgrade.cost, Number(previous.cost) || upgrade.cost),
+        };
+      });
+    } catch {
+      return INITIAL_UPGRADES.map((upgrade) => ({ ...upgrade }));
+    }
   });
 
   const [replayFrames, setReplayFrames] = useState<ReplayFrame[]>(() => {
@@ -175,10 +208,12 @@ export default function App() {
     localStorage.setItem('remocar_player_profile', JSON.stringify(profile));
     localStorage.setItem('remocar_selected_coach', selectedCoachId);
     localStorage.setItem('remocar_leaderboard', JSON.stringify(leaderboard));
+    localStorage.setItem('remocar_game_preferences', JSON.stringify(preferences));
+    localStorage.setItem('remocar_completed_career_events', JSON.stringify(completedCareerEventIds));
     if (replayFrames.length > 0) {
       localStorage.setItem('remocar_last_replay', JSON.stringify(replayFrames));
     }
-  }, [coins, trophies, cars, tracks, upgrades, profile, leaderboard, replayFrames, selectedCoachId]);
+  }, [coins, trophies, cars, tracks, upgrades, profile, leaderboard, replayFrames, selectedCoachId, preferences, completedCareerEventIds]);
 
   const handleToggleSound = () => {
     const next = !soundEnabled;
@@ -239,6 +274,27 @@ export default function App() {
     setToastMessage(`أنجزت المهمة بنجاح وحصلت على +${reward} عملة!`);
   };
 
+  const handleStartCareerEvent = (eventId: string) => {
+    const event = CAREER_EVENTS.find((item) => item.id === eventId);
+    if (!event) return;
+    if (profile.level < event.requiredLevel) {
+      setToastMessage(`تُفتح ${event.name} عند المستوى ${event.requiredLevel}.`);
+      return;
+    }
+    const firstTrack = tracks.find((track) => track.id === event.trackIds[0]);
+    if (!firstTrack) {
+      setToastMessage('تعذر تحميل مسار البطولة. أعد تشغيل اللعبة وحاول مجدداً.');
+      return;
+    }
+    setIsCareerEventsOpen(false);
+    setIsMultiplayerRoom(false);
+    setActiveCareerEvent({ id: event.id, round: 0 });
+    setSelectedTrack(firstTrack);
+    playCoachIntroduction(getSelectedCoach(selectedCoachId, profile.level).id);
+    setSoloRaceKey((key) => key + 1);
+    setScreen('game');
+  };
+
   const handleFinishRace = (won: boolean, coinsEarned: number, frames: ReplayFrame[], lapTime: number) => {
     const raceRewardMultiplier = getLevelBenefits(profile.level).coinMultiplier;
     const finalEarned = Math.round(coinsEarned * (selectedTrack?.rewardMultiplier || 1) * raceRewardMultiplier);
@@ -293,6 +349,34 @@ export default function App() {
     setMissions((prev) =>
       prev.map((m) => (m.id === 'm1' ? { ...m, completed: true } : m))
     );
+    if (activeCareerEvent) {
+      const event = CAREER_EVENTS.find((item) => item.id === activeCareerEvent.id);
+      if (event && won && activeCareerEvent.round < event.trackIds.length - 1) {
+        const nextRound = activeCareerEvent.round + 1;
+        const nextTrack = INITIAL_TRACKS.find((track) => track.id === event.trackIds[nextRound]);
+        if (nextTrack) {
+          setActiveCareerEvent({ id: event.id, round: nextRound });
+          setSelectedTrack(nextTrack);
+          playCoachIntroduction(getSelectedCoach(selectedCoachId, newLevel).id);
+          setSoloRaceKey((key) => key + 1);
+          setToastMessage(`${event.name} · الجولة ${nextRound + 1} من ${event.trackIds.length}: ${nextTrack.name}`);
+          setScreen('game');
+          return;
+        }
+      }
+      if (event && won) {
+        const firstCompletion = !completedCareerEventIds.includes(event.id);
+        if (firstCompletion) {
+          setCoins((current) => current + event.rewardCoins);
+          setTrophies((current) => current + event.rewardStars);
+          setCompletedCareerEventIds((current) => current.includes(event.id) ? current : [...current, event.id]);
+        }
+        setToastMessage(firstCompletion ? `اكتملت ${event.name}! مكافأة المسيرة: +${event.rewardCoins} عملة و${event.rewardStars} نجوم.` : `أعدت ${event.name} بنجاح؛ مكافأة الإعادة العادية محفوظة.`);
+      } else if (event) {
+        setToastMessage(`انتهت محاولة ${event.name}. أعد البطولة وحاول الفوز بكل جولة.`);
+      }
+      setActiveCareerEvent(null);
+    }
     setScreen('menu');
   };
 
@@ -342,6 +426,7 @@ export default function App() {
         onOpenSync={() => setIsSyncModalOpen(true)}
         onOpenProfile={() => setIsProfileOpen(true)}
         onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />}
 
       {/* Main Content Screens */}
@@ -363,6 +448,7 @@ export default function App() {
             onOpenInstructions={() => setIsInstructionsOpen(true)}
             onOpenMissions={() => setIsMissionsOpen(true)}
             onOpenMultiplayer={() => setIsMultiplayerOpen(true)}
+            onOpenCareerEvents={() => setIsCareerEventsOpen(true)}
           />
         )}
 
@@ -397,10 +483,11 @@ export default function App() {
         {screen === 'game' && selectedTrack && (
           <React.Suspense fallback={<div className="grid h-full min-h-0 place-items-center text-amber-300">جارٍ تحميل محرك السباق ثلاثي الأبعاد…</div>}>
             <GameCanvas
-              key={isMultiplayerRoom ? `lan-round-${multiplayerRaceKey}` : `solo-${selectedTrack.id}`}
+              key={isMultiplayerRoom ? `lan-round-${multiplayerRaceKey}` : `solo-${selectedTrack.id}-${soloRaceKey}`}
               car={selectedCar}
               track={selectedTrack}
               profile={profile}
+              preferences={preferences}
               coach={getSelectedCoach(selectedCoachId, profile.level)}
               upgrades={upgrades}
               leaderboardEntry={currentTrackLeaderboard}
@@ -417,7 +504,7 @@ export default function App() {
               onFinishMultiplayerRound={handleFinishMultiplayerRound}
               onStartNextMultiplayerRound={handleStartNextMultiplayerRound}
               onExitMultiplayer={handleExitMultiplayer}
-              onQuit={() => { if (isMultiplayerRoom) { lanMultiplayer.close(); void stopAndroidLanHost(); } setIsMultiplayerRoom(false); setMultiplayerRoundResult(null); setMultiplayerDidSubmit(false); setScreen('tracks'); }}
+              onQuit={() => { if (isMultiplayerRoom) { lanMultiplayer.close(); void stopAndroidLanHost(); } setActiveCareerEvent(null); setIsMultiplayerRoom(false); setMultiplayerRoundResult(null); setMultiplayerDidSubmit(false); setScreen('tracks'); }}
             />
           </React.Suspense>
         )}
@@ -428,6 +515,7 @@ export default function App() {
               car={selectedCar}
               track={selectedTrack}
               profile={profile}
+              preferences={preferences}
               coach={getSelectedCoach(selectedCoachId, profile.level)}
               upgrades={upgrades}
               isReplayMode={true}
@@ -499,6 +587,25 @@ export default function App() {
         tracks={tracks}
         leaderboard={leaderboard}
         onClose={() => setIsLeaderboardOpen(false)}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        preferences={preferences}
+        onChange={setPreferences}
+        soundEnabled={soundEnabled}
+        onToggleSound={handleToggleSound}
+      />
+
+      <CareerEventsModal
+        isOpen={isCareerEventsOpen}
+        onClose={() => setIsCareerEventsOpen(false)}
+        events={CAREER_EVENTS}
+        tracks={tracks}
+        playerLevel={profile.level}
+        completedEventIds={completedCareerEventIds}
+        onStart={handleStartCareerEvent}
       />
     </div>
   );

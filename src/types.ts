@@ -32,6 +32,7 @@ export interface Track {
   requiredLevel?: number;
   recordTime?: number;
   isDriftMode?: boolean;
+  isStuntTrack?: boolean;
   isLongTrack?: boolean;
   rewardMultiplier: number;
 }
@@ -51,6 +52,9 @@ export interface ReplayFrame {
   y: number;
   angle: number;
   speed: number;
+  height?: number;
+  roll?: number;
+  trackProgress?: number;
 }
 
 export interface LeaderboardEntry {
@@ -66,4 +70,11 @@ export interface PlayerProfile {
   level: number;
   xp: number;
   title: string;
+}
+
+export interface GamePreferences {
+  steeringMode: 'buttons' | 'tilt';
+  steeringSensitivity: number;
+  controlSize: 'small' | 'normal' | 'large';
+  graphicsQuality: 'performance' | 'balanced';
 }

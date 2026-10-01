@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Car, Track, ReplayFrame, LeaderboardEntry, PlayerProfile, Upgrade } from '../types';
+import { Car, Track, ReplayFrame, LeaderboardEntry, PlayerProfile, Upgrade, GamePreferences } from '../types';
 import { getTrackLayout } from '../data/trackLayouts';
 import { getLevelBenefits } from '../data/progression';
 import { RaceCoach } from '../data/raceCoaches';
@@ -8,12 +8,13 @@ import { lanMultiplayer, LanTournamentResult } from '../app/lanMultiplayer';
 import { makeVehicle as makeVehicleModel } from '../app/vehicleModel';
 import { createCoastalWater, createSkyDome, createSurfaceTexture, createTerrainMesh } from '../app/trackEnvironment';
 import { soundManager } from '../audio';
-import { Trophy, Coins, Flag, ArrowRight, Zap, Thermometer, Camera, Flame, Pause, Play, RotateCcw } from 'lucide-react';
+import { Trophy, Coins, Flag, ArrowLeft, ArrowRight, Zap, Camera, Flame, Pause, Play, RotateCcw, Shield } from 'lucide-react';
 
 interface GameCanvasProps {
   car: Car;
   track: Track;
   profile: PlayerProfile;
+  preferences: GamePreferences;
   upgrades: Upgrade[];
   leaderboardEntry?: LeaderboardEntry;
   isReplayMode?: boolean;
@@ -34,8 +35,9 @@ interface GameCanvasProps {
   onQuit: () => void;
 }
 
-type DriveInput = 'accelerate' | 'brake' | 'left' | 'right' | 'nitro';
+type DriveInput = 'accelerate' | 'brake' | 'left' | 'right' | 'nitro' | 'stunt';
 type Vehicle = { group: THREE.Group; progress: number; speed: number; finished: boolean };
+type EchoGate = { group: THREE.Group; progress: number; lastLap: number };
 
 function makeVehicle(color: string, secondaryColor: string, modelType: Car['modelType']): THREE.Group {
   const group = new THREE.Group();
@@ -145,6 +147,54 @@ function closestProgress(samples: readonly THREE.Vector3[], x: number, z: number
   return { t: bestT, distance: bestDistance };
 }
 
+function sampleEchoFrame(frames: readonly ReplayFrame[], progress: number): ReplayFrame | null {
+  if (frames.length < 2) return null;
+  let low = 0;
+  let high = frames.length - 1;
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2);
+    if ((frames[middle].trackProgress ?? 0) < progress) low = middle;
+    else high = middle;
+  }
+  const first = frames[low];
+  const second = frames[high];
+  const start = first.trackProgress ?? 0;
+  const end = second.trackProgress ?? start;
+  const blend = THREE.MathUtils.clamp((progress - start) / Math.max(0.0001, end - start), 0, 1);
+  const angleDelta = Math.atan2(Math.sin(second.angle - first.angle), Math.cos(second.angle - first.angle));
+  return {
+    x: THREE.MathUtils.lerp(first.x, second.x, blend),
+    y: THREE.MathUtils.lerp(first.y, second.y, blend),
+    angle: first.angle + angleDelta * blend,
+    speed: THREE.MathUtils.lerp(first.speed, second.speed, blend),
+    height: THREE.MathUtils.lerp(first.height ?? 0, second.height ?? 0, blend),
+    roll: THREE.MathUtils.lerp(first.roll ?? 0, second.roll ?? 0, blend),
+    trackProgress: progress,
+  };
+}
+
+function makeEchoCar(): THREE.Group {
+  const group = new THREE.Group();
+  const hologram = new THREE.MeshBasicMaterial({ color: 0x67e8f9, wireframe: true, transparent: true, opacity: 0.62, depthWrite: false });
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.72, 4.2), hologram);
+  hull.position.y = 0.72;
+  group.add(hull);
+  const cockpit = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.62, 1.75), hologram);
+  cockpit.position.set(0, 1.28, -0.25);
+  group.add(cockpit);
+  for (const [x, z] of [[-1.08, 1.15], [1.08, 1.15], [-1.08, -1.2], [1.08, -1.2]]) {
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.32, 12), hologram);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(x, 0.42, z);
+    group.add(wheel);
+  }
+  const beacon = new THREE.Mesh(new THREE.TorusGeometry(1.8, 0.075, 8, 28), hologram);
+  beacon.rotation.x = Math.PI / 2;
+  beacon.position.y = 0.24;
+  group.add(beacon);
+  return group;
+}
+
 function createCockpitModel(): { group: THREE.Group; steeringWheel: THREE.Group } {
   const group = new THREE.Group();
   const dark = new THREE.MeshStandardMaterial({ color: 0x11151a, metalness: 0.45, roughness: 0.42 });
@@ -210,6 +260,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   car,
   track,
   profile,
+  preferences,
   upgrades,
   leaderboardEntry,
   isReplayMode = false,
@@ -230,7 +281,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   onQuit,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<Record<DriveInput, boolean>>({ accelerate: false, brake: false, left: false, right: false, nitro: false });
+  const inputRef = useRef<Record<DriveInput, boolean>>({ accelerate: false, brake: false, left: false, right: false, nitro: false, stunt: false });
+  const analogSteeringRef = useRef(0);
+  const rampPadsRef = useRef<{ group: THREE.Group; lastLap: number }[]>([]);
+  const airStateRef = useRef({ height: 0, verticalSpeed: 0, duration: 0, roll: 0, stuntQueued: false, rollCompleted: false });
+  const echoVehicleRef = useRef<THREE.Group | null>(null);
+  const echoFramesRef = useRef<ReplayFrame[]>([]);
+  const currentLapFramesRef = useRef<ReplayFrame[]>([]);
+  const echoGatesRef = useRef<EchoGate[]>([]);
+  const echoAuraRef = useRef<THREE.Mesh | null>(null);
+  const echoChargeRef = useRef(0);
+  const phaseBoostUntilRef = useRef(0);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -244,6 +305,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const recordedFramesRef = useRef<ReplayFrame[]>([]);
   const previousProgressRef = useRef(0.01);
   const coinMeshesRef = useRef<{ mesh: THREE.Mesh; collected: boolean }[]>([]);
+  const boostPadsRef = useRef<{ group: THREE.Group; collected: boolean }[]>([]);
+  const collisionHitsRef = useRef(0);
+  const lastImpactAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const wasOffRoadRef = useRef(false);
   const physicsRef = useRef({ x: 0, z: 0, heading: 0, speed: 0 });
   const lapRef = useRef(1);
   const runRef = useRef({
@@ -260,10 +325,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [raceTime, setRaceTime] = useState(0);
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [engineTemp, setEngineTemp] = useState(45);
-  const [nitroCharge, setNitroCharge] = useState(() => getLevelBenefits(profile.level).nitroCapacity);
+  const [nitroCharge, setNitroCharge] = useState(() => {
+    const nitroLevel = Math.max(1, upgrades.find((upgrade) => upgrade.id === 'nitro')?.level ?? 1);
+    return Math.min(140, getLevelBenefits(profile.level).nitroCapacity + (nitroLevel - 1) * 8);
+  });
   const [cameraMode, setCameraMode] = useState<'chase' | 'hood' | 'cockpit' | 'topdown'>('chase');
   const [driftScore, setDriftScore] = useState(0);
+  const [stuntScore, setStuntScore] = useState(0);
+  const [echoCharge, setEchoCharge] = useState(0);
+  const [echoReady, setEchoReady] = useState(false);
+  const [echoBoostActive, setEchoBoostActive] = useState(false);
   const [raceWon, setRaceWon] = useState(false);
+  const [collisionHits, setCollisionHits] = useState(0);
+  const [eliminated, setEliminated] = useState(false);
+  const [eliminationReason, setEliminationReason] = useState('');
+  const [boostsCollected, setBoostsCollected] = useState(0);
+  const [hasTouchInput] = useState(() => typeof window !== 'undefined' && ('ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)));
 
   const layout = useMemo(() => getTrackLayout(track.id), [track.id]);
   const [trackProgress, setTrackProgress] = useState(0.01);
@@ -276,11 +353,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   }, [layout]);
   const minimapMarker = minimapPoints[Math.floor(trackProgress * minimapPoints.length) % minimapPoints.length]?.split(',').map(Number) ?? [50, 35];
   const levelBenefits = useMemo(() => getLevelBenefits(profile.level), [profile.level]);
+  const upgradeLevels = useMemo(() => {
+    const level = (id: string) => Math.max(1, upgrades.find((upgrade) => upgrade.id === id)?.level ?? 1);
+    return { engine: level('engine'), tires: level('tires'), nitro: level('nitro'), body: level('body') };
+  }, [upgrades]);
+  const nitroCapacity = Math.min(140, levelBenefits.nitroCapacity + (upgradeLevels.nitro - 1) * 8);
+  const maxCollisionHits = Math.min(12, 3 + Math.floor(Math.max(0, profile.level - 1) / 3) + Math.floor((upgradeLevels.body - 1) / 2));
   const baseRef = useMemo(() => ({
-    maxSpeed: (car.speed / 2.8) * levelBenefits.speedMultiplier,
-    acceleration: (car.acceleration / 22) * levelBenefits.accelerationMultiplier,
-    handling: (1.3 + car.handling / 90 + ((upgrades.find((u) => u.id === 'tires')?.level ?? 1) - 1) * 0.12) * levelBenefits.handlingMultiplier,
-  }), [car.id, car.speed, car.acceleration, car.handling, levelBenefits, upgrades]);
+    maxSpeed: (car.speed / 2.8) * levelBenefits.speedMultiplier * (1 + Math.min(0.24, (upgradeLevels.engine - 1) * 0.06)),
+    acceleration: (car.acceleration / 22) * levelBenefits.accelerationMultiplier * (1 + Math.min(0.3, (upgradeLevels.engine - 1) * 0.075)),
+    handling: (1.3 + car.handling / 90 + (upgradeLevels.tires - 1) * 0.12) * levelBenefits.handlingMultiplier * (1 + Math.min(0.2, (upgradeLevels.tires - 1) * 0.05)),
+  }), [car.id, car.speed, car.acceleration, car.handling, levelBenefits, upgradeLevels]);
 
   // Keep the animation loop in sync without re-creating WebGL state on each HUD render.
   runRef.current.gameState = gameState;
@@ -312,7 +395,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const handleDown = (event: KeyboardEvent) => {
       const map: Record<string, DriveInput | undefined> = {
         KeyW: 'accelerate', ArrowUp: 'accelerate', KeyS: 'brake', ArrowDown: 'brake',
-        KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'nitro',
+        KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'nitro', KeyE: 'stunt',
       };
       const key = map[event.code];
       if (key) {
@@ -326,7 +409,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const handleUp = (event: KeyboardEvent) => {
       const map: Record<string, DriveInput | undefined> = {
         KeyW: 'accelerate', ArrowUp: 'accelerate', KeyS: 'brake', ArrowDown: 'brake',
-        KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
+        KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', KeyE: 'stunt',
       };
       const key = map[event.code];
       if (key) setInput(key, false);
@@ -336,9 +419,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     return () => {
       window.removeEventListener('keydown', handleDown);
       window.removeEventListener('keyup', handleUp);
-      inputRef.current = { accelerate: false, brake: false, left: false, right: false, nitro: false };
+      inputRef.current = { accelerate: false, brake: false, left: false, right: false, nitro: false, stunt: false };
     };
   }, [nitroCharge, engineTemp, gameState, profile.level]);
+
+  useEffect(() => {
+    if (preferences.steeringMode !== 'tilt') {
+      analogSteeringRef.current = 0;
+      return;
+    }
+    const handleOrientation = (event: DeviceOrientationEvent) => {
+      if (event.gamma === null) return;
+      const lateralTilt = Math.abs(event.gamma) > 55 && event.beta !== null ? event.beta : event.gamma;
+      const steering = THREE.MathUtils.clamp((lateralTilt / 28) * preferences.steeringSensitivity, -1, 1);
+      analogSteeringRef.current = Math.abs(steering) < 0.09 ? 0 : steering;
+    };
+    window.addEventListener('deviceorientation', handleOrientation, true);
+    return () => {
+      window.removeEventListener('deviceorientation', handleOrientation, true);
+      analogSteeringRef.current = 0;
+    };
+  }, [preferences.steeringMode, preferences.steeringSensitivity]);
 
   function cycleCamera() {
     setCameraMode((mode) => {
@@ -352,8 +453,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     if (nitroCharge < 18 || engineTemp >= 108 || gameStateRef.current !== 'racing' || nitroActiveRef.current) return;
     nitroActiveRef.current = true;
     runRef.current.nitroActive = true;
-    const nitroCost = Math.max(16, 28 - Math.max(0, profile.level - 1) * 0.7);
-    const nitroDuration = 1350 + Math.min(650, Math.max(0, profile.level - 1) * 45);
+    const nitroCost = Math.max(12, 28 - Math.max(0, profile.level - 1) * 0.7 - (upgradeLevels.nitro - 1) * 2);
+    const nitroDuration = 1350 + Math.min(650, Math.max(0, profile.level - 1) * 45) + (upgradeLevels.nitro - 1) * 220;
     setNitroCharge((charge) => Math.max(0, charge - nitroCost));
     soundManager.playNitro();
     window.setTimeout(() => {
@@ -365,6 +466,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
+    collisionHitsRef.current = 0;
+    lastImpactAtRef.current = Number.NEGATIVE_INFINITY;
+    wasOffRoadRef.current = false;
+    rampPadsRef.current = [];
+    airStateRef.current = { height: 0, verticalSpeed: 0, duration: 0, roll: 0, stuntQueued: false, rollCompleted: false };
+    analogSteeringRef.current = 0;
+    echoVehicleRef.current = null;
+    echoFramesRef.current = [];
+    currentLapFramesRef.current = [];
+    echoGatesRef.current = [];
+    echoAuraRef.current = null;
+    echoChargeRef.current = 0;
+    phaseBoostUntilRef.current = 0;
+    setCollisionHits(0);
+    setEliminated(false);
+    setEliminationReason('');
+    setBoostsCollected(0);
+    setStuntScore(0);
+    setEchoCharge(0);
+    setEchoReady(false);
+    setEchoBoostActive(false);
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(layout.sky);
@@ -387,9 +509,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     }
     const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     const lowEndDevice = (navigator.hardwareConcurrency || 4) <= 4 || (deviceMemory ?? 4) <= 3;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lowEndDevice ? 1.35 : 1.75));
+    const pixelRatioLimit = preferences.graphicsQuality === 'performance' ? 1.05 : lowEndDevice ? 1.35 : 1.75;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioLimit));
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.enabled = preferences.graphicsQuality === 'balanced';
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -401,7 +524,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const sun = new THREE.DirectionalLight(0xfff1d5, 2.25);
     sun.position.set(-60, 110, -30);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(lowEndDevice ? 512 : 1024, lowEndDevice ? 512 : 1024);
+    const shadowSize = preferences.graphicsQuality === 'performance' ? 256 : lowEndDevice ? 512 : 1024;
+    sun.shadow.mapSize.set(shadowSize, shadowSize);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 520;
     sun.shadow.camera.left = -250;
@@ -555,8 +679,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const distance = layout.width * (0.95 + (i % 3) * 0.28);
       const x = p.x + side.x * distance * sign;
       const z = p.z + side.z * distance * sign;
-      if ((track.id === 'mp_neon_docks' || track.id === 'city_ring') && i % 2 === 0) {
-        const isNightCity = track.id === 'mp_neon_docks';
+      if ((track.id.includes('city') || track.id.includes('neon')) && i % 2 === 0) {
+        const isNightCity = track.id.includes('neon');
         const height = (isNightCity ? 8 : 10) + (i % 3) * 3;
         const tower = new THREE.Mesh(new THREE.BoxGeometry(5.5, height, 4.8), new THREE.MeshStandardMaterial({ color: i % 4 === 0 ? (isNightCity ? 0x273048 : 0x65737b) : (isNightCity ? 0x182434 : 0x3e4b53), roughness: 0.68, metalness: 0.2 }));
         tower.position.set(x, height / 2, z);
@@ -570,7 +694,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           windows.position.set(x, floor * 2.4, z + 2.46);
           scene.add(windows);
         }
-      } else if ((track.id === 'mp_desert_canyon' || track.id === 'desert_canyon') && i % 2 === 0) {
+      } else if ((track.id.includes('desert') || track.id.includes('canyon')) && i % 2 === 0) {
         const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(2.1 + (i % 3) * 0.6, 0), new THREE.MeshStandardMaterial({ color: i % 4 === 0 ? 0xc68b4b : 0x8b5e37, roughness: 0.98 }));
         rock.position.set(x, 1.5, z);
         rock.rotation.set(i * 0.31, i * 0.57, i * 0.19);
@@ -630,6 +754,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const player = makeVehicleModel(car.color, car.secondaryColor, car.modelType, car.customization);
     playerRef.current = player;
+    const echoAura = new THREE.Mesh(
+      new THREE.TorusGeometry(2.35, 0.1, 8, 36),
+      new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.78, depthWrite: false })
+    );
+    echoAura.rotation.x = Math.PI / 2;
+    echoAura.position.y = 0.34;
+    echoAura.visible = false;
+    player.add(echoAura);
+    echoAuraRef.current = echoAura;
     scene.add(player);
     const spawnT = 0.01;
     const spawnPoint = curve.getPointAt(spawnT);
@@ -638,6 +771,31 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     player.position.set(spawnPoint.x, 0.12, spawnPoint.z);
     player.rotation.y = physicsRef.current.heading;
     previousProgressRef.current = spawnT;
+
+    if (!isReplayMode && track.laps > 1) {
+      const echoCar = makeEchoCar();
+      echoCar.visible = false;
+      echoVehicleRef.current = echoCar;
+      scene.add(echoCar);
+      const gateMaterial = new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x0891b2, emissiveIntensity: 1.1, metalness: 0.35, roughness: 0.2, transparent: true, opacity: 0.78, side: THREE.DoubleSide });
+      for (const t of [0.28, 0.57, 0.84]) {
+        const point = curve.getPointAt(t);
+        const tangent = curve.getTangentAt(t);
+        const gateGroup = new THREE.Group();
+        gateGroup.position.set(point.x, 0.16, point.z);
+        gateGroup.rotation.y = Math.atan2(tangent.x, tangent.z);
+        const arch = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.11, 8, 36), gateMaterial);
+        arch.position.y = 2.35;
+        gateGroup.add(arch);
+        for (const side of [-1, 1]) {
+          const anchor = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.17, 0.65, 8), gateMaterial);
+          anchor.position.set(side * 2.2, 0.35, 0);
+          gateGroup.add(anchor);
+        }
+        scene.add(gateGroup);
+        echoGatesRef.current.push({ group: gateGroup, progress: t, lastLap: 0 });
+      }
+    }
 
     vehiclesRef.current = [];
     const aiColors = ['#38bdf8', '#22c55e', '#f59e0b'];
@@ -700,8 +858,55 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       coinMeshesRef.current.push({ mesh: coin, collected: false });
     }
 
+    boostPadsRef.current = [];
+    const boostMaterial = new THREE.MeshStandardMaterial({ color: 0x0891b2, emissive: 0x22d3ee, emissiveIntensity: 1.5, metalness: 0.25, roughness: 0.28, transparent: true, opacity: 0.88 });
+    const boostStripeMaterial = new THREE.MeshBasicMaterial({ color: 0xcffafe });
+    for (const t of [0.24, 0.52, 0.79]) {
+      const point = curve.getPointAt(t);
+      const tangent = curve.getTangentAt(t);
+      const pad = new THREE.Group();
+      pad.position.set(point.x, 0.19, point.z);
+      pad.rotation.y = Math.atan2(tangent.x, tangent.z);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(layout.width * 0.62, 0.055, 1.55), boostMaterial);
+      pad.add(base);
+      for (const z of [-0.42, 0, 0.42]) {
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(layout.width * 0.56, 0.018, 0.11), boostStripeMaterial);
+        stripe.position.set(0, 0.04, z);
+        pad.add(stripe);
+      }
+      scene.add(pad);
+      boostPadsRef.current.push({ group: pad, collected: false });
+    }
+
+    rampPadsRef.current = [];
+    if (track.isStuntTrack) {
+      const rampSurface = new THREE.MeshStandardMaterial({ color: 0x25334b, emissive: 0x0c4a6e, emissiveIntensity: 0.48, metalness: 0.74, roughness: 0.32 });
+      const rampStripe = new THREE.MeshBasicMaterial({ color: 0x67e8f9 });
+      for (const t of [0.32, 0.71]) {
+        const point = curve.getPointAt(t);
+        const tangent = curve.getTangentAt(t);
+        const rampGroup = new THREE.Group();
+        rampGroup.position.set(point.x, 0.04, point.z);
+        rampGroup.rotation.y = Math.atan2(tangent.x, tangent.z);
+        const ramp = new THREE.Mesh(new THREE.BoxGeometry(layout.width * 0.68, 0.42, 6.2), rampSurface);
+        ramp.position.set(0, 0.25, 0.34);
+        ramp.rotation.x = -0.16;
+        ramp.castShadow = true;
+        ramp.receiveShadow = true;
+        rampGroup.add(ramp);
+        for (const stripeZ of [-1.05, 0.15, 1.35]) {
+          const stripe = new THREE.Mesh(new THREE.BoxGeometry(layout.width * 0.58, 0.035, 0.17), rampStripe);
+          stripe.position.set(0, 0.49 + stripeZ * 0.16, stripeZ);
+          stripe.rotation.x = -0.16;
+          rampGroup.add(stripe);
+        }
+        scene.add(rampGroup);
+        rampPadsRef.current.push({ group: rampGroup, lastLap: 0 });
+      }
+    }
+
     const physics = physicsRef.current;
-    const effectiveMaxSpeed = baseRef.maxSpeed * (1 + Math.max(0, (upgrades.find((u) => u.id === 'engine')?.level ?? 1) - 1) * 0.055);
+    const effectiveMaxSpeed = baseRef.maxSpeed;
     const acceleration = baseRef.acceleration;
     const steering = baseRef.handling;
     let animationId = 0;
@@ -723,6 +928,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (won) soundManager.playVictory();
     };
 
+    const registerImpact = (reason: string, now: number) => {
+      const impactCooldown = 950 + Math.min(800, (upgradeLevels.body - 1) * 120);
+      if (now - lastImpactAtRef.current < impactCooldown) return false;
+      lastImpactAtRef.current = now;
+      collisionHitsRef.current += 1;
+      const totalHits = collisionHitsRef.current;
+      setCollisionHits(totalHits);
+      soundManager.playCrash();
+      if (totalHits >= maxCollisionHits) {
+        setEliminated(true);
+        setEliminationReason(reason);
+        finishRace(false);
+      }
+      return true;
+    };
+
     const animate = (time: number) => {
       animationId = requestAnimationFrame(animate);
       const dt = previousTime === 0 ? 0.016 : Math.min(0.05, (time - previousTime) / 1000);
@@ -731,12 +952,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       if (state === 'racing' && !isReplayMode) {
         const input = inputRef.current;
-        const maxSpeed = effectiveMaxSpeed * (nitroActiveRef.current ? levelBenefits.nitroMultiplier : 1);
+        const nitroMultiplier = levelBenefits.nitroMultiplier + Math.min(0.32, (upgradeLevels.nitro - 1) * 0.08);
+        const phaseMultiplier = time < phaseBoostUntilRef.current ? 1.32 : 1;
+        const maxSpeed = effectiveMaxSpeed * (nitroActiveRef.current ? nitroMultiplier : 1) * phaseMultiplier;
         if (input.accelerate) physics.speed = Math.min(maxSpeed, physics.speed + acceleration * dt);
         else if (input.brake) physics.speed = Math.max(-maxSpeed * 0.34, physics.speed - acceleration * dt * 1.6);
         else physics.speed *= Math.exp(-0.52 * dt);
 
-        const steeringTarget = Number(input.left) - Number(input.right);
+        const steeringTarget = THREE.MathUtils.clamp(Number(input.right) - Number(input.left) + analogSteeringRef.current, -1, 1);
         smoothedSteering += (steeringTarget - smoothedSteering) * (1 - Math.exp(-dt * 11));
         const speedFactor = THREE.MathUtils.clamp(Math.abs(physics.speed) / Math.max(1, maxSpeed), 0, 1);
         const turnRate = steering * 0.5 * (0.25 + speedFactor * 0.75);
@@ -749,10 +972,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const progress = closestProgress(trackSamples, physics.x, physics.z);
         const offRoad = progress.distance > layout.width * 0.51;
         if (offRoad) {
-          physics.speed *= Math.exp(-2.8 * dt);
-          if (Math.abs(physics.speed) > 3) soundManager.playCrash();
+          const grip = 1 + Math.min(0.4, (upgradeLevels.tires - 1) * 0.08);
+          physics.speed *= Math.exp((-2.8 / grip) * dt);
         }
+        if (offRoad && !wasOffRoadRef.current) registerImpact('الخروج عن حدود المضمار', time);
+        wasOffRoadRef.current = offRoad;
         if (previousProgressRef.current > 0.82 && progress.t < 0.18 && Math.abs(physics.speed) > 2.5 && !offRoad) {
+          if (currentLapFramesRef.current.length > 18) {
+            echoFramesRef.current = currentLapFramesRef.current;
+            setEchoReady(true);
+          }
+          currentLapFramesRef.current = [];
+          echoGatesRef.current.forEach((gate) => { gate.group.visible = true; });
           const nextLap = lapRef.current + 1;
           lapRef.current = nextLap;
           setLap(nextLap);
@@ -760,9 +991,63 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
         previousProgressRef.current = progress.t;
 
+        const echoFrame = !isReplayMode && echoFramesRef.current.length > 1 ? sampleEchoFrame(echoFramesRef.current, progress.t) : null;
+        if (echoVehicleRef.current && echoFrame) {
+          echoVehicleRef.current.visible = true;
+          echoVehicleRef.current.position.set(echoFrame.x, 0.12 + (echoFrame.height ?? 0), echoFrame.y);
+          echoVehicleRef.current.rotation.set(0, echoFrame.angle, echoFrame.roll ?? 0);
+          echoVehicleRef.current.traverse((object) => {
+            if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshBasicMaterial) {
+              object.material.opacity = 0.45 + Math.sin(time * 0.004) * 0.12;
+            }
+          });
+        }
+
+        const air = airStateRef.current;
+        if (track.isStuntTrack && air.height <= 0 && air.verticalSpeed <= 0 && Math.abs(physics.speed) > 8) {
+          const ramp = rampPadsRef.current.find((candidate) => !offRoad && candidate.lastLap !== lapRef.current && Math.hypot(physics.x - candidate.group.position.x, physics.z - candidate.group.position.z) < 4.1);
+          if (ramp) {
+            ramp.lastLap = lapRef.current;
+            air.verticalSpeed = Math.min(9.2, 5.8 + Math.abs(physics.speed) * 0.05);
+            air.duration = 0;
+            air.roll = 0;
+            air.stuntQueued = false;
+            air.rollCompleted = false;
+            soundManager.playNitro();
+          }
+        }
+        if (air.verticalSpeed > 0 || air.height > 0) {
+          air.duration += dt;
+          if (input.stunt && air.height > 0.18) air.stuntQueued = true;
+          if (air.stuntQueued && !air.rollCompleted) {
+            air.roll = Math.min(Math.PI * 2, air.roll + dt * 6.7);
+            if (air.roll >= Math.PI * 2) {
+              air.rollCompleted = true;
+              air.stuntQueued = false;
+            }
+          }
+          air.verticalSpeed -= 13.2 * dt;
+          air.height += air.verticalSpeed * dt;
+          if (air.height <= 0) {
+            air.height = 0;
+            air.verticalSpeed = 0;
+            setStuntScore((score) => score + (air.rollCompleted ? 500 : 100));
+            setCoinsCollected((total) => total + (air.rollCompleted ? 120 : 25));
+            soundManager.playCoin();
+            air.duration = 0;
+            air.roll = 0;
+            air.stuntQueued = false;
+            air.rollCompleted = false;
+          }
+        }
+
         if (playerRef.current) {
-          playerRef.current.position.set(physics.x, 0.12, physics.z);
-          playerRef.current.rotation.y = physics.heading;
+          playerRef.current.position.set(physics.x, 0.12 + air.height, physics.z);
+          playerRef.current.rotation.set(0, physics.heading, air.height > 0 ? air.roll : 0);
+        }
+        if (echoAuraRef.current) {
+          echoAuraRef.current.visible = time < phaseBoostUntilRef.current;
+          echoAuraRef.current.rotation.z += dt * 2.6;
         }
 
         if (isMultiplayerRoom && time - lastNetworkUpdate > 75) {
@@ -791,16 +1076,55 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           }
         }
 
-        recordedFramesRef.current.push({ x: physics.x, y: physics.z, angle: physics.heading, speed: physics.speed });
+        for (const pad of boostPadsRef.current) {
+          if (!pad.collected && Math.hypot(physics.x - pad.group.position.x, physics.z - pad.group.position.z) < 3.1) {
+            pad.collected = true;
+            pad.group.visible = false;
+            setBoostsCollected((count) => count + 1);
+            setNitroCharge((charge) => Math.min(nitroCapacity, charge + 35));
+            physics.speed = Math.min(maxSpeed, physics.speed + 4.5);
+            soundManager.playNitro();
+          }
+        }
+
+        if (echoFrame) {
+          for (const gate of echoGatesRef.current) {
+            if (gate.group.visible && gate.lastLap !== lapRef.current && Math.hypot(physics.x - gate.group.position.x, physics.z - gate.group.position.z) < 3.6) {
+              gate.lastLap = lapRef.current;
+              gate.group.visible = false;
+              const echoDistance = Math.hypot(physics.x - echoFrame.x, physics.z - echoFrame.y);
+              if (echoDistance < 4.6) {
+                const chargeGain = echoDistance < 2.7 ? 34 : 22;
+                const nextCharge = Math.min(100, echoChargeRef.current + chargeGain);
+                echoChargeRef.current = nextCharge;
+                setEchoCharge(nextCharge);
+                soundManager.playCoin();
+                if (nextCharge >= 100) {
+                  echoChargeRef.current = 0;
+                  setEchoCharge(0);
+                  phaseBoostUntilRef.current = time + 2200;
+                  physics.speed = Math.min(effectiveMaxSpeed * 1.32, physics.speed + 7.5);
+                  setCoinsCollected((total) => total + 80);
+                  soundManager.playNitro();
+                }
+              }
+            }
+          }
+        }
+
+        const frame: ReplayFrame = { x: physics.x, y: physics.z, angle: physics.heading, speed: physics.speed, height: air.height, roll: air.roll, trackProgress: progress.t };
+        recordedFramesRef.current.push(frame);
+        currentLapFramesRef.current.push(frame);
         hudAccumulator += dt;
         if (hudAccumulator > 0.12) {
           hudAccumulator = 0;
           setCurrentSpeed(Math.round(Math.abs(physics.speed) * 3.6));
           setTrackProgress(progress.t);
+          setEchoBoostActive(time < phaseBoostUntilRef.current);
           if (nitroActiveRef.current) setEngineTemp((temp) => Math.min(115, temp + 1.1));
           else if (Math.abs(physics.speed) > 24) setEngineTemp((temp) => Math.min(96, temp + 0.24));
           else setEngineTemp((temp) => Math.max(45, temp - 0.34));
-          setNitroCharge((charge) => Math.min(levelBenefits.nitroCapacity, charge + 0.12));
+          setNitroCharge((charge) => Math.min(nitroCapacity, charge + 0.12));
           if (track.isDriftMode && (input.left || input.right) && Math.abs(physics.speed) > 12) setDriftScore((score) => score + 5);
         }
         if (time - lastEngineUpdate > 170) {
@@ -815,9 +1139,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const nextFrame = replayFrames[(Math.floor(cursor) + 1) % frameCount];
         if (frame && nextFrame && playerRef.current) {
           const blend = cursor - Math.floor(cursor);
-          playerRef.current.position.set(THREE.MathUtils.lerp(frame.x, nextFrame.x, blend), 0.12, THREE.MathUtils.lerp(frame.y, nextFrame.y, blend));
+          playerRef.current.position.set(THREE.MathUtils.lerp(frame.x, nextFrame.x, blend), 0.12 + THREE.MathUtils.lerp(frame.height ?? 0, nextFrame.height ?? 0, blend), THREE.MathUtils.lerp(frame.y, nextFrame.y, blend));
           const angleDelta = Math.atan2(Math.sin(nextFrame.angle - frame.angle), Math.cos(nextFrame.angle - frame.angle));
           playerRef.current.rotation.y = frame.angle + angleDelta * blend;
+          playerRef.current.rotation.z = THREE.MathUtils.lerp(frame.roll ?? 0, nextFrame.roll ?? 0, blend);
           setCurrentSpeed(Math.round(Math.abs(THREE.MathUtils.lerp(frame.speed, nextFrame.speed, blend)) * 3.6));
         }
         replayIndexRef.current += dt * 60;
@@ -832,14 +1157,40 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         remote.rotation.y += angleDelta * blend;
       }
 
+      if (state === 'racing' && !isReplayMode && airStateRef.current.height < 0.6) {
+        let impactTarget: THREE.Group | null = null;
+        for (const vehicle of vehiclesRef.current) {
+          if (Math.hypot(physics.x - vehicle.group.position.x, physics.z - vehicle.group.position.z) < 2.7) {
+            impactTarget = vehicle.group;
+            break;
+          }
+        }
+        if (!impactTarget) {
+          for (const remote of remoteVehicles.values()) {
+            if (Math.hypot(physics.x - remote.position.x, physics.z - remote.position.z) < 2.7) {
+              impactTarget = remote;
+              break;
+            }
+          }
+        }
+        if (impactTarget && registerImpact('الاصطدام بسيارة منافسة', time)) {
+          const dx = impactTarget.position.x - physics.x;
+          const dz = impactTarget.position.z - physics.z;
+          const side = Math.sign(Math.sin(physics.heading) * dz - Math.cos(physics.heading) * dx) || 1;
+          physics.speed = Math.max(0, physics.speed * Math.min(0.58, 0.32 + (upgradeLevels.body - 1) * 0.055));
+          physics.heading -= side * 0.16;
+        }
+      }
+
       if (playerRef.current && cameraRef.current && state !== 'paused') {
         const p = playerRef.current.position;
         cockpitRig.group.visible = cameraModeRef.current === 'cockpit';
         const cameraBlend = cameraFollowBlend(dt);
         if (cameraModeRef.current === 'chase') {
-          cameraTarget.set(p.x - Math.sin(physics.heading) * 13.5, 5.2, p.z - Math.cos(physics.heading) * 13.5);
+          const jumpHeight = Math.max(0, p.y - 0.12);
+          cameraTarget.set(p.x - Math.sin(physics.heading) * 13.5, 5.2 + jumpHeight * 0.85, p.z - Math.cos(physics.heading) * 13.5);
           camera.position.lerp(cameraTarget, cameraBlend);
-          camera.lookAt(p.x + Math.sin(physics.heading) * 5.5, 1.05, p.z + Math.cos(physics.heading) * 5.5);
+          camera.lookAt(p.x + Math.sin(physics.heading) * 5.5, 1.05 + jumpHeight * 0.5, p.z + Math.cos(physics.heading) * 5.5);
         } else if (cameraModeRef.current === 'hood') {
           cameraTarget.set(p.x + Math.sin(physics.heading) * 1.5, 2.3, p.z + Math.cos(physics.heading) * 1.5);
           camera.position.lerp(cameraTarget, cameraBlend);
@@ -887,8 +1238,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       rendererRef.current = null;
       playerRef.current = null;
       vehiclesRef.current = [];
+      boostPadsRef.current = [];
+      rampPadsRef.current = [];
+      echoVehicleRef.current = null;
+      echoFramesRef.current = [];
+      currentLapFramesRef.current = [];
+      echoGatesRef.current = [];
+      echoAuraRef.current = null;
     };
-  }, [track.id, car.id, isMultiplayerRoom]);
+  }, [track.id, car.id, isMultiplayerRoom, preferences.graphicsQuality]);
 
   useEffect(() => {
     gameStateRef.current = gameState;
@@ -907,13 +1265,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     setGameState('racing');
   };
 
+  const steeringButtonSize = preferences.controlSize === 'small' ? 'h-12 w-12' : preferences.controlSize === 'large' ? 'h-16 w-16' : 'h-14 w-14';
+  const acceleratorButtonSize = preferences.controlSize === 'small' ? 'h-12 w-14' : preferences.controlSize === 'large' ? 'h-16 w-20' : 'h-14 w-16';
+  const brakeButtonSize = preferences.controlSize === 'small' ? 'h-10 w-14' : preferences.controlSize === 'large' ? 'h-14 w-20' : 'h-11 w-16';
+  const actionButtonSize = preferences.controlSize === 'small' ? 'h-10 w-12' : preferences.controlSize === 'large' ? 'h-14 w-16' : 'h-11 w-14';
+
   return (
     <div className="flex h-full min-h-0 w-full max-w-none flex-col gap-2 p-2 sm:p-3 animate-fadeIn text-right relative">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-slate-900/90 border border-slate-800 p-2 sm:p-3 rounded-2xl shadow-xl z-10 relative">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 text-white font-bold"><Flag className="w-5 h-5 text-red-500" /><span>اللفة: {Math.min(lap, track.laps)} / {track.laps}</span></div>
           <div className="flex items-center gap-2 text-white font-bold"><Coins className="w-5 h-5 text-amber-400" /><span>العملات: {coinsCollected}</span></div>
+          {track.laps > 1 && <div className="flex items-center gap-1.5 text-cyan-200" title={echoReady ? 'زامن موقعك مع صدى اللفة السابقة عند بوابات النور لشحن الاندفاع الزمني' : 'أكمل لفتك الأولى لصناعة صدى زمني'}><RotateCcw className="h-3.5 w-3.5" /><span className="text-[10px] font-bold">صدى الزمن</span><span className="h-1.5 w-12 overflow-hidden rounded-full bg-slate-700"><span className="block h-full rounded-full bg-cyan-300 transition-[width]" style={{ width: `${echoCharge}%` }} /></span><span className="text-[9px] font-black">{echoReady ? `${echoCharge}%` : 'يسجل'}</span></div>}
+          {echoBoostActive && <div className="flex items-center gap-1 rounded-lg bg-cyan-500/20 px-2 py-1 text-cyan-100"><Zap className="h-3.5 w-3.5" /><span className="text-[9px] font-black">اندفاع زمني</span></div>}
           {track.isDriftMode && <div className="flex items-center gap-2 text-amber-400 font-bold"><Flame className="w-4 h-4" /><span>الدريفت: {driftScore}</span></div>}
+          {track.isStuntTrack && <div className="flex items-center gap-2 text-cyan-200 font-bold"><RotateCcw className="w-4 h-4" /><span>الاستعراض: {stuntScore}</span></div>}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <button onClick={cycleCamera} aria-label="تغيير زاوية الكاميرا" className="flex items-center gap-2 bg-indigo-600/30 border border-indigo-500/50 text-indigo-300 px-3 py-2 rounded-xl text-xs font-bold"><Camera className="w-4 h-4" /><span>{cameraMode === 'chase' ? 'خلف السيارة' : cameraMode === 'hood' ? 'من المقدمة' : cameraMode === 'cockpit' ? 'قمرة القيادة' : 'علوية'}</span></button>
@@ -926,7 +1292,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       <div className="relative min-h-0 flex-1 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
         <div ref={mountRef} className="absolute inset-0 h-full w-full touch-none" aria-label={`سباق ثلاثي الأبعاد - ${track.name}`} />
         <div className="absolute top-4 left-4 z-10 rounded-2xl border border-white/10 bg-slate-950/80 p-2.5 shadow-xl backdrop-blur" aria-label="خريطة مصغرة للمضمار">
-          <svg viewBox="0 0 100 70" className="h-16 w-24 md:h-20 md:w-28" role="img" aria-label={`خريطة ${track.name}`}>
+          <svg viewBox="0 0 100 70" className="h-12 w-16 md:h-14 md:w-20" role="img" aria-label={`خريطة ${track.name}`}>
             <polyline points={minimapPoints.join(' ')} fill="none" stroke="#64748b" strokeWidth="10" strokeLinejoin="round" strokeLinecap="round" />
             <polyline points={minimapPoints.join(' ')} fill="none" stroke={track.id.includes('neon') ? '#22d3ee' : '#fbbf24'} strokeWidth="2.1" strokeLinejoin="round" strokeLinecap="round" />
             <circle cx={minimapMarker[0]} cy={minimapMarker[1]} r="4.3" fill="#ef4444" stroke="white" strokeWidth="1.2" />
@@ -935,28 +1301,38 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         </div>
         <div className="absolute right-4 top-4 z-10 flex max-w-[58%] items-center gap-2 rounded-xl border border-amber-300/20 bg-slate-950/85 p-2 shadow-xl backdrop-blur sm:max-w-[360px]">
           <img src={coach.portrait} alt="" className="h-10 w-9 shrink-0 rounded-lg object-cover" />
-          <div className="min-w-0 text-right"><div className="text-[10px] font-black text-amber-200">{coach.name} · نصيحة</div><div className="line-clamp-2 text-[9px] leading-4 text-slate-200">{coach.hint}</div></div>
+          <div className="min-w-0 text-right"><div className="text-[10px] font-black text-amber-200">{coach.name} · نصيحة</div><div className="line-clamp-2 text-[9px] leading-4 text-slate-200">{coach.hint}</div>{track.laps > 1 && <div className="mt-1 text-[8px] font-bold text-cyan-200">صدى الزمن: أكمل لفة، ثم مرّ ببوابات النور قريباً من ظلك لتحصل على اندفاع.</div>}</div>
         </div>
-        <div className="absolute bottom-4 left-4 bg-slate-950/85 border border-slate-700 p-3 rounded-2xl text-white z-10 flex items-center gap-3">
-          <div className="text-xl font-black text-red-400">{currentSpeed}<span className="text-[9px] text-slate-400 block">KM/H</span></div>
-          <div className="text-xs text-slate-300"><Thermometer className="w-4 h-4 inline text-amber-400" /> {Math.round(engineTemp)}°C</div>
-          <div className="w-20 h-2 bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-600" style={{ width: `${Math.min(100, currentSpeed / 2.4)}%` }} /></div>
+        <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-700 bg-slate-950/85 px-2.5 py-1.5 text-white shadow-lg backdrop-blur">
+          <div className="text-lg font-black leading-none text-red-400">{currentSpeed}<span className="ml-1 text-[8px] font-bold text-slate-400">KM/H</span></div>
+          <div className="flex items-center gap-1.5 border-l border-slate-700 pl-2" aria-label={`الصدمات ${collisionHits} من ${maxCollisionHits}`}>
+            <Shield className="h-3.5 w-3.5 text-amber-300" />
+            <div className="flex gap-0.5">{Array.from({ length: Math.min(maxCollisionHits, 8) }, (_, hit) => <span key={hit} className={`h-2 w-2 rounded-full ${hit < collisionHits ? 'bg-red-500' : 'bg-emerald-400'}`} />)}</div>
+            <span className="text-[9px] font-bold text-slate-200">{collisionHits}/{maxCollisionHits}</span>
+          </div>
+          <div className="flex items-center gap-0.5 text-cyan-200" aria-label={`${boostsCollected} معززات تم جمعها`}><Zap className="h-3 w-3" /><span className="text-[9px] font-bold">{boostsCollected}</span></div>
         </div>
 
-        {!isReplayMode && gameState === 'racing' && (
-          <div className="absolute bottom-4 right-4 flex items-end gap-3 z-20 md:hidden select-none">
-            <div className="flex gap-2">
-              {([['left', '◀'], ['right', '▶']] as const).map(([key, label]) => (
-                <button key={key} aria-label={key === 'left' ? 'انعطف يساراً' : 'انعطف يميناً'} onContextMenu={(e) => e.preventDefault()} onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setInput(key, true); }} onPointerUp={() => setInput(key, false)} onPointerCancel={() => setInput(key, false)} onLostPointerCapture={() => setInput(key, false)} className="w-14 h-16 rounded-2xl bg-slate-900/90 border border-slate-500 text-white text-2xl active:bg-slate-700 touch-none">{label}</button>
+        {!isReplayMode && gameState === 'racing' && hasTouchInput && <>
+          <div className="absolute bottom-3 left-3 z-20 flex flex-col items-center gap-1 select-none">
+            <span className="rounded-md bg-slate-950/65 px-2 py-0.5 text-[9px] font-bold text-slate-300">المقود</span>
+            <div dir="ltr" className="flex gap-2">
+              {([['left', ArrowLeft], ['right', ArrowRight]] as const).map(([key, Icon]) => (
+                <button key={key} aria-label={key === 'left' ? 'انعطف يساراً' : 'انعطف يميناً'} onContextMenu={(e) => e.preventDefault()} onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setInput(key, true); }} onPointerUp={() => setInput(key, false)} onPointerCancel={() => setInput(key, false)} onLostPointerCapture={() => setInput(key, false)} className={`flex ${steeringButtonSize} items-center justify-center rounded-full border border-slate-400/80 bg-slate-950/80 text-white shadow-lg active:bg-indigo-600 touch-none`}><Icon className="h-6 w-6" /></button>
               ))}
             </div>
+          </div>
+          <div dir="rtl" className="absolute bottom-3 right-3 z-20 flex items-end gap-2 select-none">
             <div className="flex flex-col gap-2">
-              <button aria-label="تسارع" onContextMenu={(e) => e.preventDefault()} onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setInput('accelerate', true); }} onPointerUp={() => setInput('accelerate', false)} onPointerCancel={() => setInput('accelerate', false)} onLostPointerCapture={() => setInput('accelerate', false)} className="w-20 h-14 rounded-2xl bg-red-600/90 border border-red-300 text-white font-black active:bg-red-500 touch-none">تسارع</button>
-              <button aria-label="فرامل" onContextMenu={(e) => e.preventDefault()} onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setInput('brake', true); }} onPointerUp={() => setInput('brake', false)} onPointerCancel={() => setInput('brake', false)} onLostPointerCapture={() => setInput('brake', false)} className="w-20 h-12 rounded-2xl bg-slate-700/90 border border-slate-400 text-white font-bold active:bg-slate-600 touch-none">فرامل</button>
-              <button aria-label="نيترو" onPointerDown={(e) => { e.preventDefault(); activateNitro(); }} className="w-20 h-11 rounded-2xl bg-amber-500/90 border border-amber-200 text-slate-950 font-black touch-none"><Zap className="inline w-4 h-4" /> نيترو</button>
+              <button aria-label="تسارع" onContextMenu={(e) => e.preventDefault()} onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setInput('accelerate', true); }} onPointerUp={() => setInput('accelerate', false)} onPointerCancel={() => setInput('accelerate', false)} onLostPointerCapture={() => setInput('accelerate', false)} className={`${acceleratorButtonSize} rounded-2xl border border-red-300 bg-red-600/90 text-[11px] font-black text-white shadow-lg active:bg-red-500 touch-none`}>تسارع</button>
+              <button aria-label="فرامل" onContextMenu={(e) => e.preventDefault()} onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setInput('brake', true); }} onPointerUp={() => setInput('brake', false)} onPointerCancel={() => setInput('brake', false)} onLostPointerCapture={() => setInput('brake', false)} className={`${brakeButtonSize} rounded-2xl border border-slate-400 bg-slate-700/90 text-[11px] font-bold text-white shadow-lg active:bg-slate-600 touch-none`}>فرامل</button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button aria-label="نيترو" onPointerDown={(e) => { e.preventDefault(); activateNitro(); }} className={`${actionButtonSize} rounded-xl border border-amber-200 bg-amber-500/90 text-[10px] font-black text-slate-950 shadow-lg touch-none`}><Zap className="inline h-4 w-4" /> نيترو</button>
+              {track.isStuntTrack && <button aria-label="استعراض أثناء القفز" onContextMenu={(e) => e.preventDefault()} onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setInput('stunt', true); }} onPointerUp={() => setInput('stunt', false)} onPointerCancel={() => setInput('stunt', false)} onLostPointerCapture={() => setInput('stunt', false)} className={`${actionButtonSize} rounded-xl border border-cyan-200 bg-cyan-600/90 text-[10px] font-black text-white shadow-lg touch-none`}><RotateCcw className="inline h-4 w-4" /> استعراض</button>}
             </div>
           </div>
-        )}
+        </>}
 
         {gameState === 'countdown' && !isReplayMode && <div className="absolute inset-0 bg-slate-950/55 backdrop-blur-sm flex flex-col items-center justify-center z-30 pointer-events-none"><span className="text-8xl font-black text-red-500 animate-pulse">{countdownNum > 0 ? countdownNum : 'انطلق!'}</span><p className="text-white font-bold mt-2">{track.name}</p></div>}
 
@@ -966,9 +1342,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm flex flex-col items-center justify-center z-30 p-5 text-center overflow-y-auto">
             <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center mb-3"><Trophy className="w-8 h-8" /></div>
             {!multiplayerResult ? <>
-              <h2 className="text-2xl font-black text-white mb-1">انتهت الجولة {multiplayerRound} من {multiplayerRoundsTotal}</h2>
+              <h2 className="text-2xl font-black text-white mb-1">{eliminated ? `أُقصيت بعد ${maxCollisionHits} صدمات` : `انتهت الجولة ${multiplayerRound} من ${multiplayerRoundsTotal}`}</h2>
               <p className="text-slate-300 mb-3">{track.name} · توقيتك {raceTime.toFixed(1)} ثانية</p>
-              {multiplayerDidSubmit ? <p className="text-amber-200 font-bold mb-4" aria-live="polite">تم إرسال توقيتك · بانتظار بقية اللاعبين ({multiplayerFinishedCount}/{multiplayerPlayerCount})</p> : <button onClick={() => onFinishMultiplayerRound?.(raceTime)} className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 text-white font-bold px-6 py-3 rounded-xl"><span>إرسال نتيجة الجولة</span><ArrowRight className="w-5 h-5" /></button>}
+              {eliminated && <p className="mb-3 text-sm font-bold text-red-300">{eliminationReason} · سجّل الإقصاء لتكتمل نتيجة الجولة.</p>}
+              {multiplayerDidSubmit ? <p className="text-amber-200 font-bold mb-4" aria-live="polite">تم إرسال نتيجتك · بانتظار بقية اللاعبين ({multiplayerFinishedCount}/{multiplayerPlayerCount})</p> : <button onClick={() => onFinishMultiplayerRound?.(Math.min(35_999, raceTime + (eliminated ? 900 : 0)))} className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 text-white font-bold px-6 py-3 rounded-xl"><span>{eliminated ? 'تسجيل نتيجة الإقصاء' : 'إرسال نتيجة الجولة'}</span><ArrowRight className="w-5 h-5" /></button>}
             </> : <>
               <h2 className="text-2xl font-black text-white mb-1">{multiplayerResult.type === 'match_complete' ? 'انتهت البطولة!' : `نتائج الجولة ${multiplayerResult.round}`}</h2>
               {multiplayerResult.type === 'round_complete' && <p className="text-slate-300 mb-3">{multiplayerResult.finishOrder.find((result) => result.playerId === lanMultiplayer.playerId)?.place ? `مركزك في الجولة: ${multiplayerResult.finishOrder.find((result) => result.playerId === lanMultiplayer.playerId)?.place}` : 'تم اعتماد ترتيب الجولة.'}</p>}
@@ -985,7 +1362,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 : <button onClick={onExitMultiplayer} className="bg-gradient-to-r from-red-600 to-amber-500 text-white font-bold px-6 py-3 rounded-xl">العودة إلى القائمة الرئيسية</button>}
             </>}
           </div>
-        ) : <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center z-30 p-6 text-center"><div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 ${raceWon ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-700 text-slate-200'}`}><Trophy className="w-9 h-9" /></div><h2 className="text-3xl font-black text-white mb-2">{raceWon ? 'فوز مستحق!' : 'انتهى السباق'}</h2><p className="text-slate-300 mb-2">{track.name} · {raceTime.toFixed(1)} ثانية</p><p className="text-amber-300 font-bold mb-5">{raceWon ? `+${coinsCollected + 150} عملة` : `+${coinsCollected + 35} عملة مشاركة`}</p><button onClick={() => onFinishRace(raceWon, coinsCollected + (raceWon ? 150 : 35), recordedFramesRef.current, raceTime)} className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 text-white font-bold px-7 py-3 rounded-xl"><span>حفظ النتيجة</span><ArrowRight className="w-5 h-5" /></button></div>)}
+        ) : <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center z-30 p-6 text-center"><div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 ${raceWon ? 'bg-amber-500/20 text-amber-300' : eliminated ? 'bg-red-500/20 text-red-300' : 'bg-slate-700 text-slate-200'}`}><Trophy className="w-9 h-9" /></div><h2 className="text-3xl font-black text-white mb-2">{raceWon ? 'فوز مستحق!' : eliminated ? `أُقصيت بعد ${maxCollisionHits} صدمات` : 'انتهى السباق'}</h2>{eliminated && <p className="mb-2 text-sm font-bold text-red-300">{eliminationReason} · حاول تفادي المنافسين وحدود المضمار.</p>}<p className="text-slate-300 mb-2">{track.name} · {raceTime.toFixed(1)} ثانية</p>{track.isStuntTrack && <p className="mb-2 text-sm font-bold text-cyan-200">نقاط الاستعراض: {stuntScore}</p>}<p className="text-amber-300 font-bold mb-5">{raceWon ? `+${coinsCollected + 150} عملة` : `+${coinsCollected + 35} عملة مشاركة`}</p><button onClick={() => onFinishRace(raceWon, coinsCollected + (raceWon ? 150 : 35), recordedFramesRef.current, raceTime)} className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 text-white font-bold px-7 py-3 rounded-xl"><span>حفظ النتيجة</span><ArrowRight className="w-5 h-5" /></button></div>)}
       </div>
       {leaderboardEntry && <p className="mt-3 text-xs text-slate-400">أفضل توقيت مسجل: {leaderboardEntry.bestTime.toFixed(1)} ث</p>}
     </div>

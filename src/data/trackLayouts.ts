@@ -72,6 +72,31 @@ const layouts: Record<string, TrackLayout> = {
     width: 15, road: 0x332f35, line: 0xff8561, sky: 0x171a2c, fog: 0x3a2931, fogDensity: 0.0044, ground: 0x291f22,
     decoration: 'cones', decorationColor: 0xf9735b,
   },
+  desert_stunt_dunes: {
+    points: [[-78, -24], [-62, -58], [-31, -42], [-4, -64], [31, -50], [69, -55], [82, -17], [55, 9], [71, 43], [34, 65], [2, 40], [-34, 62], [-69, 40], [-84, 7]],
+    width: 18, road: 0x66503a, line: 0xfde68a, sky: 0xe9b96e, fog: 0xc8965f, fogDensity: 0.0028, ground: 0xa87945,
+    decoration: 'cones', decorationColor: 0xd19a54,
+  },
+  city_sky_bridge: {
+    points: [[-72, -34], [-51, -65], [-7, -60], [20, -40], [58, -57], [77, -21], [52, 2], [73, 36], [39, 62], [7, 43], [-28, 64], [-67, 39], [-79, 2]],
+    width: 17, road: 0x344454, line: 0x67e8f9, sky: 0x6d8da1, fog: 0x40576b, fogDensity: 0.0038, ground: 0x38434b,
+    decoration: 'cones', decorationColor: 0x38bdf8,
+  },
+  canyon_stunt_circuit: {
+    points: [[-82, -27], [-66, -63], [-38, -47], [-12, -26], [16, -55], [53, -63], [81, -31], [57, -4], [76, 30], [45, 61], [8, 43], [-24, 65], [-63, 47], [-86, 11]],
+    width: 19, road: 0x5a493b, line: 0xfb923c, sky: 0xd49a6d, fog: 0x997052, fogDensity: 0.0031, ground: 0x8a6041,
+    decoration: 'cones', decorationColor: 0xc88750,
+  },
+  neon_stadium_loop: {
+    points: [[-68, -37], [-50, -64], [-9, -58], [19, -43], [56, -57], [75, -25], [54, 0], [72, 31], [43, 57], [7, 44], [-25, 61], [-62, 39], [-77, 4]],
+    width: 20, road: 0x29263f, line: 0xf0abfc, sky: 0x1c1739, fog: 0x382448, fogDensity: 0.0048, ground: 0x211b31,
+    decoration: 'cones', decorationColor: 0xe879f9,
+  },
+  mp_stunt_ridge: {
+    points: [[-78, -31], [-52, -62], [-20, -45], [9, -67], [45, -52], [75, -27], [55, 0], [75, 35], [42, 63], [8, 41], [-27, 67], [-65, 46], [-82, 9]],
+    width: 16, road: 0x536271, line: 0xf0f9ff, sky: 0xb7d3ec, fog: 0x9aacbf, fogDensity: 0.0043, ground: 0xb9c8d0,
+    decoration: 'cones', decorationColor: 0xeff6ff,
+  },
 };
 
 export function getTrackLayout(trackId: string): TrackLayout {

@@ -173,9 +173,9 @@ let carTemplatePromise: Promise<THREE.Group> | null = null;
 function loadCarTemplate(): Promise<THREE.Group> {
   if (!carTemplatePromise) {
     carTemplatePromise = new GLTFLoader().loadAsync('/models/car-concept/CarConcept.gltf').then(({ scene }) => {
-      // This licensed source model is Z-up and points toward -Y; convert it to
-      // the game's Y-up / forward-+Z convention before measuring and scaling.
-      scene.rotation.x = -Math.PI / 2;
+      // The GLTF root transform has already converted the source model to the
+      // game's Y-up convention; its front wheels are at +Z. A second X rotation
+      // would stand the whole car on its side, so preserve the imported axes.
       scene.updateMatrixWorld(true);
       const bounds = new THREE.Box3().setFromObject(scene);
       const center = bounds.getCenter(new THREE.Vector3());

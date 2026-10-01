@@ -5,6 +5,8 @@ import heroBanner from '../assets/images/remocar_home_hero.webp';
 import gameIcon from '../assets/images/remocar_game_icon.webp';
 import { getLevelTitle } from '../data/progression';
 import { RaceCoachSelector } from './RaceCoachSelector';
+import { VehicleArtwork } from './VehicleArtwork';
+const CarShowroom = React.lazy(() => import('./CarShowroom').then((module) => ({ default: module.CarShowroom })));
 
 interface MainMenuProps {
   selectedCar: Car;
@@ -22,6 +24,7 @@ interface MainMenuProps {
   onOpenInstructions: () => void;
   onOpenMissions: () => void;
   onOpenMultiplayer: () => void;
+  onOpenCareerEvents: () => void;
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({
@@ -40,6 +43,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   onOpenInstructions,
   onOpenMissions,
   onOpenMultiplayer,
+  onOpenCareerEvents,
 }) => {
   const [showCopyright, setShowCopyright] = useState(true);
   const levelXp = Math.max(0, profileXp - (profileLevel - 1) * 500);
@@ -52,7 +56,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
   }, []);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8 animate-fadeIn">
+    <div className="max-w-6xl mx-auto px-4 py-4 md:py-6 animate-fadeIn">
       {/* Developer Copyright Pulsing Banner */}
       <div aria-live="polite" className={`mb-6 text-center transition-opacity duration-1000 ${showCopyright ? 'opacity-100' : 'opacity-0'}`}>
         <div className="inline-block bg-amber-500/10 border border-amber-500/30 text-amber-400 px-6 py-2 rounded-2xl text-xs md:text-sm font-bold shadow-lg shadow-amber-500/10 backdrop-blur-md">
@@ -62,7 +66,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       </div>
 
       {/* Hero Banner with Generated AI Image */}
-      <div className="relative min-h-[420px] overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl mb-10 text-right">
+      <div className="relative min-h-[320px] md:min-h-[360px] overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl mb-6 text-right">
         <div className="absolute inset-0 z-0">
           <img
             src={heroBanner}
@@ -73,14 +77,14 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           <div className="absolute inset-0 bg-gradient-to-l from-slate-950/95 via-slate-950/55 to-slate-950/10" />
         </div>
 
-        <div className="relative z-10 p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-8">
+        <div className="relative z-10 p-5 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="max-w-xl">
             <p className="mb-3 text-xs font-bold text-amber-200">أهلاً {playerName} · موسم السباقات الجديد</p>
             <div className="inline-flex items-center gap-2 bg-red-500/20 border border-red-500/40 text-red-300 px-3.5 py-1.5 rounded-full text-xs font-bold mb-4 shadow-sm backdrop-blur-md">
               <Sparkles className="w-4 h-4" />
               <span>دعم اللعب الجماعي عبر Wi-Fi المحلي بدون إنترنت</span>
             </div>
-            <h2 className="text-3xl md:text-5xl font-black text-white mb-4 leading-tight drop-shadow-md">
+            <h2 className="text-3xl md:text-4xl font-black text-white mb-3 leading-tight drop-shadow-md">
               سباق سيارات التحكم عن بعد <span className="bg-gradient-to-r from-red-400 via-amber-300 to-yellow-300 bg-clip-text text-transparent">REMOCAR</span>
             </h2>
             <p className="text-slate-200 text-base md:text-lg mb-6 leading-relaxed drop-shadow">
@@ -97,14 +101,14 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <div className="flex flex-wrap items-center gap-4">
               <button
                 onClick={() => onNavigate('tracks')}
-                className="flex items-center gap-3 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-black px-8 py-4 rounded-2xl shadow-xl shadow-red-600/40 transition-all hover:scale-105 active:scale-95 text-lg"
+                className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-black px-6 py-3 rounded-2xl shadow-xl shadow-red-600/40 transition-all hover:scale-105 active:scale-95 text-base"
               >
                 <Play className="w-6 h-6 fill-current" />
                 <span>السباق الفردي</span>
               </button>
               <button
                 onClick={onOpenMultiplayer}
-                className="flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black px-8 py-4 rounded-2xl shadow-xl shadow-indigo-600/40 transition-all hover:scale-105 active:scale-95 text-lg"
+                className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black px-6 py-3 rounded-2xl shadow-xl shadow-indigo-600/40 transition-all hover:scale-105 active:scale-95 text-base"
               >
                 <Wifi className="w-6 h-6 animate-pulse" />
                 <span>اللعب الجماعي Wi-Fi</span>
@@ -122,7 +126,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           </div>
 
           {/* Featured Car Showcase Card */}
-          <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-3xl p-6 shadow-2xl w-full md:w-80 text-center relative group">
+          <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-3xl p-4 shadow-2xl w-full md:w-80 text-center relative group">
             <div className="absolute top-3 right-3 w-10 h-10 rounded-2xl overflow-hidden border border-amber-500/40 shadow-md">
               <img
                 src={gameIcon}
@@ -134,9 +138,9 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <div className="absolute top-3 left-3 bg-red-600/20 text-red-400 text-xs px-2.5 py-1 rounded-full font-bold">
               سيارتك الحالية
             </div>
-            <div className="text-7xl mb-4 py-4 group-hover:scale-110 transition-transform duration-300">
-              {selectedCar.imageIcon}
-            </div>
+            <React.Suspense fallback={<div className="h-40"><VehicleArtwork car={selectedCar} /></div>}>
+              <CarShowroom car={selectedCar} compact />
+            </React.Suspense>
             <h3 className="text-xl font-bold text-white mb-1">{selectedCar.name}</h3>
             <p className="text-xs text-slate-400 mb-4">{selectedCar.description}</p>
             
@@ -176,7 +180,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       <RaceCoachSelector level={profileLevel} selectedCoachId={selectedCoachId} onSelect={onSelectCoach} onPlayVoice={onPlayCoachVoice} />
 
       {/* Quick Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
+      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-5 mb-10">
         <div 
           onClick={() => onNavigate('tracks')}
           className="bg-slate-900/80 border border-slate-800 hover:border-slate-700 rounded-3xl p-6 cursor-pointer group transition-all hover:-translate-y-1 shadow-xl text-right"
@@ -208,6 +212,17 @@ export const MainMenu: React.FC<MainMenuProps> = ({
           </div>
           <h3 className="text-lg font-bold text-white mb-2">المهام اليومية</h3>
           <p className="text-sm text-slate-400">أنجز التحديات اليومية واجمع عملات إضافية.</p>
+        </div>
+
+        <div
+          onClick={onOpenCareerEvents}
+          className="bg-slate-900/80 border border-amber-500/20 hover:border-amber-400/60 rounded-3xl p-6 cursor-pointer group transition-all hover:-translate-y-1 shadow-xl text-right"
+        >
+          <div className="w-12 h-12 rounded-2xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-300 mb-4 group-hover:scale-110 transition-transform">
+            <Trophy className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold text-white mb-2">بطولات المسيرة</h3>
+          <p className="text-sm text-slate-400">سلاسل سباق فردية من عدة جولات ومكافآت نهائية.</p>
         </div>
 
         <div 

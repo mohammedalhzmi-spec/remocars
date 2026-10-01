@@ -1,14 +1,16 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Car } from '../types';
 import { makeVehicle } from '../app/vehicleModel';
+import { VehicleArtwork } from './VehicleArtwork';
 
-interface CarShowroomProps { car: Car; }
+interface CarShowroomProps { car: Car; compact?: boolean; }
 
-export const CarShowroom: React.FC<CarShowroomProps> = ({ car }) => {
+export const CarShowroom: React.FC<CarShowroomProps> = ({ car, compact = false }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ x: number; rotation: number } | null>(null);
   const vehicleRef = useRef<THREE.Group | null>(null);
+  const [rendererUnavailable, setRendererUnavailable] = useState(false);
 
   useEffect(() => {
     const container = mountRef.current;
@@ -17,8 +19,10 @@ export const CarShowroom: React.FC<CarShowroomProps> = ({ car }) => {
     try {
       renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'high-performance' });
     } catch {
+      setRendererUnavailable(true);
       return;
     }
+    setRendererUnavailable(false);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -117,7 +121,8 @@ export const CarShowroom: React.FC<CarShowroomProps> = ({ car }) => {
     dragRef.current = null;
   };
 
-  return <div onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={endDrag} className="relative h-64 md:h-80 rounded-3xl overflow-hidden border border-amber-500/20 bg-[radial-gradient(ellipse_at_50%_35%,#28364a_0%,#101521_55%,#080b12_100%)] touch-pan-y cursor-grab active:cursor-grabbing">
+  return <div onPointerDown={beginDrag} onPointerMove={drag} onPointerUp={endDrag} onPointerCancel={endDrag} className={`relative ${compact ? 'h-40 sm:h-44' : 'h-64 md:h-80'} rounded-3xl overflow-hidden border border-amber-500/20 bg-[radial-gradient(ellipse_at_50%_35%,#28364a_0%,#101521_55%,#080b12_100%)] touch-pan-y cursor-grab active:cursor-grabbing`}>
+    {rendererUnavailable && <div className="absolute inset-3 grid place-items-center"><VehicleArtwork car={car} className="h-full w-full drop-shadow-2xl" /></div>}
     <div ref={mountRef} className="absolute inset-0" aria-label={`معاينة ثلاثية الأبعاد لسيارة ${car.name}`} />
     <div className="absolute right-4 top-4 rounded-full border border-amber-400/25 bg-black/45 px-3 py-1 text-[10px] font-bold text-amber-200 backdrop-blur">معرض ثلاثي الأبعاد · اسحب لتدوير السيارة</div>
     <div className="absolute bottom-4 left-4 rounded-xl border border-white/10 bg-black/45 px-3 py-2 text-[10px] text-slate-300 backdrop-blur">مجسم قابل للدوران · إضاءة ومواد معدنية</div>

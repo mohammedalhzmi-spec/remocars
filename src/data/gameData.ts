@@ -82,6 +82,51 @@ export const INITIAL_TRACKS: Track[] = [
     unlocked: false,
     requiredLevel: 8,
     rewardMultiplier: 2.8,
+  },
+  {
+    id: 'desert_stunt_dunes',
+    name: 'كثبان السراب · قفزات صحراوية',
+    difficulty: 'محترف',
+    background: 'from-amber-800 via-orange-950 to-slate-950',
+    laps: 3,
+    unlocked: false,
+    requiredLevel: 3,
+    isStuntTrack: true,
+    rewardMultiplier: 2.5,
+  },
+  {
+    id: 'city_sky_bridge',
+    name: 'جسر السحاب · منعطفات مرتفعة',
+    difficulty: 'صعب',
+    background: 'from-cyan-900 via-slate-900 to-indigo-950',
+    laps: 4,
+    unlocked: false,
+    requiredLevel: 3,
+    isStuntTrack: true,
+    rewardMultiplier: 2.3,
+  },
+  {
+    id: 'canyon_stunt_circuit',
+    name: 'وادي الصدى · ساحة الاستعراض',
+    difficulty: 'تحدي الدريفت',
+    background: 'from-orange-900 via-red-950 to-slate-950',
+    laps: 3,
+    unlocked: false,
+    requiredLevel: 6,
+    isDriftMode: true,
+    isStuntTrack: true,
+    rewardMultiplier: 3.1,
+  },
+  {
+    id: 'neon_stadium_loop',
+    name: 'حلبة النيون الكبرى · نهائي الأبطال',
+    difficulty: 'ملحمي طويل',
+    background: 'from-fuchsia-950 via-indigo-950 to-slate-950',
+    laps: 5,
+    unlocked: false,
+    requiredLevel: 8,
+    isStuntTrack: true,
+    rewardMultiplier: 3.2,
   }
 ];
 
@@ -112,5 +157,14 @@ export const INITIAL_UPGRADES: Upgrade[] = [
     cost: 220,
     bonus: 12,
     description: 'يحسن الثبات ويقلل الانزلاق في المنعطفات والطقس الممطر.'
+  },
+  {
+    id: 'body',
+    name: 'هيكل مدعم مقاوم للصدمات',
+    level: 1,
+    maxLevel: 5,
+    cost: 280,
+    bonus: 1,
+    description: 'يزيد تحمل السيارة؛ كل مستويين يضيفان فرصة تحمل صدمة، ويخففان فقدان السرعة عند الاصطدام.'
   }
 ];
