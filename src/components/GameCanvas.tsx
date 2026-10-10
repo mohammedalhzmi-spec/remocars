@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Car, Track, ReplayFrame, LeaderboardEntry, PlayerProfile } from '../types';
 import { soundManager } from '../audio';
-import { Trophy, Coins, Flag, ArrowRight, Zap, Thermometer, Camera, Flame, ShieldAlert, Award } from 'lucide-react';
+import { Trophy, Coins, Flag, ArrowRight, Zap, Thermometer, Camera, Flame, ShieldAlert, Settings, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 
 interface GameCanvasProps {
   car: Car;
@@ -37,16 +37,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [nitroCharge, setNitroCharge] = useState<number>(100);
   const [collisionCount, setCollisionCount] = useState<number>(0);
 
-  // Near Miss / Close Pass Combo System (Asphalt style)
-  const [nearMissCombo, setNearMissCombo] = useState<number>(0);
+  // Release 1.6 Features State
+  // 5 Camera Angles: 'chase' | 'hood' | 'cockpit' | 'side' | 'topdown'
+  const [cameraMode, setCameraMode] = useState<'chase' | 'hood' | 'cockpit' | 'side' | 'topdown'>('chase');
+  const [cameraZoom, setCameraZoom] = useState<number>(1.0); // Zoom in/out factor
+  const [steeringStyle, setSteeringStyle] = useState<'classic' | 'slanted' | 'circular'>('classic');
+  const [controlSide, setControlSide] = useState<'left' | 'right'>('right'); // steering on left or right
+  const [wheelSize, setWheelSize] = useState<number>(100); // percentage for circular wheel size
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+
   const [comboPopup, setComboPopup] = useState<string | null>(null);
-
-  const [driftScore, setDriftScore] = useState<number>(0);
-  const [cameraMode, setCameraMode] = useState<'chase' | 'hood' | 'topdown'>('chase');
-
-  // Touch control states for Asphalt 8 realistic touch UI
   const [touchSteer, setTouchSteer] = useState<-1 | 0 | 1>(0);
-  const [touchThrottle, setTouchThrottle] = useState<number>(0); // 1 for forward, -1 for reverse
+  const [touchThrottle, setTouchThrottle] = useState<number>(0);
   const [isBraking, setIsBraking] = useState<boolean>(false);
 
   // Three.js refs
@@ -67,17 +69,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     z: 0,
     angle: 0,
     speed: 0,
-    maxSpeed: 1.3 + (car.speed / 45),
-    acceleration: 0.035 + (car.acceleration / 900),
-    handling: 0.038 + (car.handling / 1400),
+    maxSpeed: 1.35 + (car.speed / 45),
+    acceleration: 0.038 + (car.acceleration / 900),
+    handling: 0.04 + (car.handling / 1400),
   });
 
   const aiCarsData = useRef([
-    { x: 30, z: 30, angle: 0, speed: 1.0, passed: false },
-    { x: -40, z: 50, angle: Math.PI / 2, speed: 0.95, passed: false },
-    { x: 60, z: -30, angle: Math.PI, speed: 1.05, passed: false },
-    { x: -50, z: -50, angle: -Math.PI / 2, speed: 0.9, passed: false },
+    { x: 35, z: 35, angle: 0, speed: 1.0 },
+    { x: -45, z: 55, angle: Math.PI / 2, speed: 0.95 },
+    { x: 65, z: -35, angle: Math.PI, speed: 1.05 },
+    { x: -55, z: -55, angle: -Math.PI / 2, speed: 0.9 },
   ]);
+
+  // Load saved preferences
+  useEffect(() => {
+    const savedStyle = localStorage.getItem('remocar_steering_style');
+    if (savedStyle) setSteeringStyle(savedStyle as any);
+    const savedSide = localStorage.getItem('remocar_control_side');
+    if (savedSide) setControlSide(savedSide as any);
+    const savedSize = localStorage.getItem('remocar_wheel_size');
+    if (savedSize) setWheelSize(parseInt(savedSize, 10));
+  }, []);
 
   // Countdown timer
   useEffect(() => {
@@ -93,27 +105,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     }
   }, [gameState, countdownNum, isReplayMode]);
 
-  // Race timer & Near miss timeout reset
+  // Race timer
   useEffect(() => {
     if (gameState !== 'racing') return;
     const interval = setInterval(() => {
       setRaceTime((t) => t + 0.1);
-      setNitroCharge((prev) => Math.min(100, prev + 0.7));
+      setNitroCharge((prev) => Math.min(100, prev + 0.75));
       setEngineTemp((temp) => {
         if (nitroActive) return Math.min(115, temp + 1.2);
         if (currentSpeed > 90) return Math.min(95, temp + 0.3);
         return Math.max(45, temp - 0.5);
       });
-
-      // Reset combo if no near miss for 4 seconds
-      if (Date.now() - lastNearMissTimeRef.current > 4000 && nearMissCombo > 0) {
-        setNearMissCombo(0);
-      }
     }, 100);
     return () => clearInterval(interval);
-  }, [gameState, nitroActive, currentSpeed, nearMissCombo]);
+  }, [gameState, nitroActive, currentSpeed]);
 
-  // Keyboard listeners
+  // Keyboard listeners (+, -, C, and arrow/WASD controls)
   useEffect(() => {
     if (isReplayMode) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -128,7 +135,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       }
       if (e.code === 'KeyC') {
-        setCameraMode((m) => (m === 'chase' ? 'hood' : m === 'hood' ? 'topdown' : 'chase'));
+        setCameraMode((m) => 
+          m === 'chase' ? 'hood' : m === 'hood' ? 'cockpit' : m === 'cockpit' ? 'side' : m === 'side' ? 'topdown' : 'chase'
+        );
+      }
+      if (e.code === 'Equal' || e.code === 'NumpadAdd') {
+        setCameraZoom((z) => Math.max(0.6, z - 0.1));
+      }
+      if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
+        setCameraZoom((z) => Math.min(1.8, z + 0.1));
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -142,14 +157,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     };
   }, [nitroCharge, engineTemp, isReplayMode]);
 
-  // Three.js Setup & Main Animation Loop
+  // Three.js Setup & Main Animation Loop (Release 1.6 True 3D + FOV Dynamic Stretch)
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050811);
-    scene.fog = new THREE.FogExp2(0x050811, 0.012);
+    scene.background = new THREE.Color(0x04060f);
+    scene.fog = new THREE.FogExp2(0x04060f, 0.01);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(65, container.clientWidth / container.clientHeight, 0.1, 1000);
@@ -162,12 +177,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     rendererRef.current = renderer;
     container.appendChild(renderer.domElement);
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xfff5ea, 1.8);
-    dirLight.position.set(60, 120, 60);
+    const dirLight = new THREE.DirectionalLight(0xfff8ee, 1.9);
+    dirLight.position.set(70, 140, 70);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
@@ -177,23 +191,23 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const trackGroup = new THREE.Group();
     scene.add(trackGroup);
 
-    const groundGeo = new THREE.PlaneGeometry(1200, 1200);
-    const groundMat = new THREE.MeshStandardMaterial({ color: 0x0b1329, roughness: 0.9 });
+    const groundGeo = new THREE.PlaneGeometry(1400, 1400);
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x090e1f, roughness: 0.9 });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     trackGroup.add(ground);
 
-    const roadGeo = new THREE.RingGeometry(45, 100, 64);
-    const roadMat = new THREE.MeshStandardMaterial({ color: 0x182238, roughness: 0.5, side: THREE.DoubleSide });
+    const roadGeo = new THREE.RingGeometry(48, 105, 64);
+    const roadMat = new THREE.MeshStandardMaterial({ color: 0x162035, roughness: 0.45, side: THREE.DoubleSide });
     const road = new THREE.Mesh(roadGeo, roadMat);
     road.rotation.x = -Math.PI / 2;
     road.position.y = 0.1;
     road.receiveShadow = true;
     trackGroup.add(road);
 
-    const barrierGeo = new THREE.TorusGeometry(102, 1.8, 16, 100);
-    const barrierMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+    const barrierGeo = new THREE.TorusGeometry(108, 1.9, 16, 100);
+    const barrierMat = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
     const barrier = new THREE.Mesh(barrierGeo, barrierMat);
     barrier.rotation.x = Math.PI / 2;
     barrier.position.y = 1;
@@ -205,20 +219,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     carMeshRef.current = carGroup;
 
     const bodyGeo = new THREE.BoxGeometry(2.4, 0.9, 4.8);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: car.color, metalness: 0.85, roughness: 0.15 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color: car.color, metalness: 0.88, roughness: 0.12 });
     const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
     bodyMesh.position.y = 0.6;
     bodyMesh.castShadow = true;
     carGroup.add(bodyMesh);
 
     const cabinGeo = new THREE.BoxGeometry(1.8, 0.7, 2.4);
-    const cabinMat = new THREE.MeshStandardMaterial({ color: car.secondaryColor, metalness: 0.9, roughness: 0.1 });
+    const cabinMat = new THREE.MeshStandardMaterial({ color: car.secondaryColor, metalness: 0.92, roughness: 0.08 });
     const cabinMesh = new THREE.Mesh(cabinGeo, cabinMat);
     cabinMesh.position.set(0, 1.2, -0.2);
     cabinMesh.castShadow = true;
     carGroup.add(cabinMesh);
 
-    // AI Traffic Cars Meshes
+    // AI Traffic Cars
     aiMeshsRef.current = [];
     aiCarsData.current.forEach((ai) => {
       const aiGroup = new THREE.Group();
@@ -248,7 +262,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (gameState === 'racing' && !isReplayMode) {
         const physics = carPhysics.current;
         const keys = keysRef.current;
-        const maxSpd = nitroActive ? physics.maxSpeed * 1.9 : (isBraking ? physics.maxSpeed * 0.4 : physics.maxSpeed);
+        const maxSpd = nitroActive ? physics.maxSpeed * 1.95 : (isBraking ? physics.maxSpeed * 0.35 : physics.maxSpeed);
         const accelerationRate = isBraking ? physics.acceleration * 2 : physics.acceleration;
 
         if (keys['KeyW'] || keys['ArrowUp'] || touchThrottle > 0) {
@@ -273,17 +287,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         physics.x += Math.sin(physics.angle) * physics.speed;
         physics.z += Math.cos(physics.angle) * physics.speed;
 
-        setCurrentSpeed(Math.round(Math.abs(physics.speed) * 125));
+        const currentSpdVal = Math.round(Math.abs(physics.speed) * 130);
+        setCurrentSpeed(currentSpdVal);
 
-        // Track collision boundaries with 5-crash threshold rule
+        // 5-Crash threshold rule
         const distFromCenter = Math.hypot(physics.x, physics.z);
-        if (distFromCenter < 45 || distFromCenter > 98) {
+        if (distFromCenter < 48 || distFromCenter > 103) {
           physics.speed *= -0.4;
           soundManager.playCrash();
           setCollisionCount((c) => {
             const nextCount = c + 1;
             if (nextCount >= 5) {
-              setNitroCharge((nc) => Math.max(0, nc - 20));
+              setNitroCharge((nc) => Math.max(0, nc - 25));
             }
             return nextCount;
           });
@@ -294,7 +309,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           carMeshRef.current.rotation.y = physics.angle;
         }
 
-        // AI Cars movement & Near-Miss / Close-Pass detection (Asphalt style)
+        // AI Cars movement & Near-Miss detection
         aiCarsData.current.forEach((ai, idx) => {
           ai.x += Math.sin(ai.angle) * ai.speed;
           ai.z += Math.cos(ai.angle) * ai.speed;
@@ -306,21 +321,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             mesh.rotation.y = ai.angle;
           }
 
-          // Check proximity for Near-Miss (محاذاة قريبة)
           const distanceToPlayer = Math.hypot(physics.x - ai.x, physics.z - ai.z);
-          if (distanceToPlayer < 7 && distanceToPlayer > 2 && Math.abs(physics.speed) > 0.6) {
+          if (distanceToPlayer < 7.5 && distanceToPlayer > 2 && Math.abs(physics.speed) > 0.6) {
             const now = Date.now();
             if (now - lastNearMissTimeRef.current > 1200) {
               lastNearMissTimeRef.current = now;
-              setNearMissCombo((prev) => {
-                const newCombo = prev + 1;
-                setComboPopup(`NEAR MISS x${newCombo}! (+${newCombo * 15} NITRO)`);
-                setTimeout(() => setComboPopup(null), 1500);
-                setNitroCharge((nc) => Math.min(100, nc + newCombo * 15));
-                setCoinsCollected((cc) => cc + newCombo * 10);
-                soundManager.playCoin();
-                return newCombo;
-              });
+              setComboPopup(`محاذاة قريبة (NEAR MISS)! (+20 NITRO)`);
+              setTimeout(() => setComboPopup(null), 1500);
+              setNitroCharge((nc) => Math.min(100, nc + 20));
+              setCoinsCollected((cc) => cc + 15);
+              soundManager.playCoin();
             }
           }
         });
@@ -341,24 +351,48 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ghostIndexRef.current = (ghostIndexRef.current + 1) % leaderboardEntry.ghostFrames.length;
         }
 
+        // Release 1.6: 5 Camera Angles & Dynamic FOV stretch on Nitro/Speed
         if (cameraRef.current && carMeshRef.current) {
           const carPos = carMeshRef.current.position;
+          const baseFov = 65;
+          cameraRef.current.fov = baseFov + (Math.abs(physics.speed) * (nitroActive ? 18 : 6)) * cameraZoom;
+          cameraRef.current.updateProjectionMatrix();
+
           if (cameraMode === 'chase') {
             cameraRef.current.position.set(
-              carPos.x - Math.sin(physics.angle) * 15,
-              carPos.y + 6.5,
-              carPos.z - Math.cos(physics.angle) * 15
+              carPos.x - Math.sin(physics.angle) * (15 * cameraZoom),
+              carPos.y + (6.5 * cameraZoom),
+              carPos.z - Math.cos(physics.angle) * (15 * cameraZoom)
             );
             cameraRef.current.lookAt(carPos.x, carPos.y + 1, carPos.z);
           } else if (cameraMode === 'hood') {
             cameraRef.current.position.set(carPos.x, carPos.y + 2.2, carPos.z);
             cameraRef.current.lookAt(
-              carPos.x + Math.sin(physics.angle) * 25,
+              carPos.x + Math.sin(physics.angle) * 30,
               carPos.y + 1.6,
-              carPos.z + Math.cos(physics.angle) * 25
+              carPos.z + Math.cos(physics.angle) * 30
             );
+          } else if (cameraMode === 'cockpit') {
+            cameraRef.current.position.set(
+              carPos.x + Math.sin(physics.angle) * 0.2,
+              carPos.y + 1.35,
+              carPos.z + Math.cos(physics.angle) * 0.2
+            );
+            cameraRef.current.lookAt(
+              carPos.x + Math.sin(physics.angle) * 40,
+              carPos.y + 1.2,
+              carPos.z + Math.cos(physics.angle) * 40
+            );
+          } else if (cameraMode === 'side') {
+            cameraRef.current.position.set(
+              carPos.x + Math.cos(physics.angle) * 12,
+              carPos.y + 4,
+              carPos.z - Math.sin(physics.angle) * 12
+            );
+            cameraRef.current.lookAt(carPos.x, carPos.y, carPos.z);
           } else {
-            cameraRef.current.position.set(carPos.x, carPos.y + 38, carPos.z - 28);
+            // topdown
+            cameraRef.current.position.set(carPos.x, carPos.y + (40 * cameraZoom), carPos.z - 25);
             cameraRef.current.lookAt(carPos.x, carPos.y, carPos.z);
           }
         }
@@ -383,11 +417,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       renderer.dispose();
       container.innerHTML = '';
     };
-  }, [gameState, car, cameraMode, leaderboardEntry, isBraking]);
+  }, [gameState, car, cameraMode, cameraZoom, leaderboardEntry, isBraking, nitroActive]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-4 animate-fadeIn text-right relative select-none">
-      {/* HUD Header (Asphalt Style) */}
+      {/* Release 1.6 HUD Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/95 border border-slate-800 p-4 rounded-2xl mb-3 shadow-2xl z-10 relative">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2 text-white font-bold">
@@ -410,33 +444,63 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           </div>
         )}
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* 5 Camera angles button */}
           <button
-            onClick={() => setCameraMode((m) => (m === 'chase' ? 'hood' : m === 'hood' ? 'topdown' : 'chase'))}
+            onClick={() => setCameraMode((m) => 
+              m === 'chase' ? 'hood' : m === 'hood' ? 'cockpit' : m === 'cockpit' ? 'side' : m === 'side' ? 'topdown' : 'chase'
+            )}
             className="flex items-center gap-2 bg-indigo-600/30 border border-indigo-500/50 hover:bg-indigo-600/50 text-indigo-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
+            title="تبديل زوايا التصوير الخمس"
           >
             <Camera className="w-4 h-4" />
-            <span>الكاميرا: {cameraMode === 'chase' ? 'خلف' : cameraMode === 'hood' ? 'مقدمة' : 'علوية'}</span>
+            <span>الكاميرا: {cameraMode === 'chase' ? 'مطاردة' : cameraMode === 'hood' ? 'مقدمة' : cameraMode === 'cockpit' ? 'قمرة' : cameraMode === 'side' ? 'جانبية' : 'علوية'}</span>
+          </button>
+
+          {/* Zoom Buttons */}
+          <div className="flex bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+            <button
+              onClick={() => setCameraZoom((z) => Math.max(0.6, z - 0.1))}
+              className="px-2.5 py-2 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1 border-l border-slate-700"
+              title="تقريب الكاميرا"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setCameraZoom((z) => Math.min(1.8, z + 0.1))}
+              className="px-2.5 py-2 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1"
+              title="إبعاد الكاميرا"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Settings / Controls style button */}
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="p-2.5 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors"
+            title="إعدادات التحكم والدواسات"
+          >
+            <Settings className="w-4 h-4 text-amber-400" />
           </button>
 
           {!isReplayMode && (
-            <div className="flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2">
               <Zap className={`w-5 h-5 ${nitroCharge > 20 ? 'text-amber-400 animate-bounce' : 'text-slate-600'}`} />
-              <div className="w-28 h-3.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700 shadow-inner">
+              <div className="w-24 h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
                 <div 
-                  className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 transition-all shadow-lg"
+                  className="h-full bg-gradient-to-r from-amber-500 to-red-600 transition-all"
                   style={{ width: `${nitroCharge}%` }}
                 />
               </div>
-              <span className="text-xs text-slate-300 font-mono">النيترو [Space]</span>
             </div>
           )}
 
           <button
             onClick={onQuit}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors"
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors"
           >
-            {isReplayMode ? 'إغلاق' : 'انسحاب'}
+            خروج
           </button>
         </div>
       </div>
@@ -445,48 +509,70 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       <div className="relative rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950 flex justify-center">
         <div ref={mountRef} className="w-full aspect-[16/10] block" />
 
-        {/* Speedometer (Asphalt 8 Style) */}
+        {/* Speedometer */}
         <div className="absolute bottom-6 left-6 bg-slate-900/95 backdrop-blur-md border border-slate-700 p-4 rounded-3xl shadow-2xl flex items-center gap-4 text-white z-10 pointer-events-none">
           <div className="relative w-20 h-20 rounded-full bg-slate-950 border-4 border-slate-800 flex flex-col items-center justify-center shadow-inner">
             <span className="text-2xl font-black text-red-500">{currentSpeed}</span>
             <span className="text-[10px] text-slate-400 font-bold uppercase">KM/H</span>
           </div>
           <div>
-            <div className="text-xs font-bold text-slate-400 mb-1">عداد السرعة (Asphalt 3D)</div>
+            <div className="text-xs font-bold text-slate-400 mb-1">عداد السرعة (Release 1.6)</div>
             <div className="w-24 h-2 bg-slate-800 rounded-full overflow-hidden">
               <div 
                 className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-600 transition-all"
-                style={{ width: `${Math.min(100, (currentSpeed / 300) * 100)}%` }}
+                style={{ width: `${Math.min(100, (currentSpeed / 320) * 100)}` }}
               />
             </div>
           </div>
         </div>
 
-        {/* Asphalt 8 Realistic Touch Steering & Pedals UI */}
-        <div className="absolute bottom-6 right-6 flex items-end gap-6 z-20 md:hidden">
-          {/* Steering Wheel / Left & Right Buttons */}
-          <div className="flex gap-2 bg-slate-900/80 backdrop-blur-md p-2 rounded-3xl border border-slate-700/80 shadow-2xl">
-            <button
-              onTouchStart={() => setTouchSteer(-1)}
-              onTouchEnd={() => setTouchSteer(0)}
-              onMouseDown={() => setTouchSteer(-1)}
-              onMouseUp={() => setTouchSteer(0)}
-              className="w-16 h-20 bg-gradient-to-t from-slate-800 to-slate-700 border border-slate-600 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-lg active:bg-slate-600 active:scale-95 transition-transform"
+        {/* Release 1.6 Touch Controls: 3 Pedal Styles & Side Swapping */}
+        <div className={`absolute bottom-6 ${controlSide === 'right' ? 'right-6' : 'left-6'} flex items-end gap-6 z-20 md:hidden`}>
+          {steeringStyle === 'circular' ? (
+            <div 
+              className="bg-slate-900/80 backdrop-blur-md rounded-full border-4 border-slate-700/80 shadow-2xl flex items-center justify-center relative touch-none"
+              style={{ width: `${wheelSize}px`, height: `${wheelSize}px` }}
             >
-              ◀
-            </button>
-            <button
-              onTouchStart={() => setTouchSteer(1)}
-              onTouchEnd={() => setTouchSteer(0)}
-              onMouseDown={() => setTouchSteer(1)}
-              onMouseUp={() => setTouchSteer(0)}
-              className="w-16 h-20 bg-gradient-to-t from-slate-800 to-slate-700 border border-slate-600 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-lg active:bg-slate-600 active:scale-95 transition-transform"
-            >
-              ▶
-            </button>
-          </div>
+              <div className="absolute inset-2 rounded-full border-2 border-dashed border-slate-600 flex items-center justify-center">
+                <div className="w-4 h-16 bg-gradient-to-t from-red-600 to-amber-500 rounded-full shadow-lg" />
+              </div>
+              <div className="flex gap-2 absolute -bottom-10">
+                <button
+                  onTouchStart={() => setTouchSteer(-1)}
+                  onTouchEnd={() => setTouchSteer(0)}
+                  className="px-4 py-2 bg-slate-800 rounded-xl text-white font-bold text-xs"
+                >◀</button>
+                <button
+                  onTouchStart={() => setTouchSteer(1)}
+                  onTouchEnd={() => setTouchSteer(0)}
+                  className="px-4 py-2 bg-slate-800 rounded-xl text-white font-bold text-xs"
+                >▶</button>
+              </div>
+            </div>
+          ) : (
+            <div className={`flex ${steeringStyle === 'slanted' ? 'skew-y-6' : ''} gap-2 bg-slate-900/80 backdrop-blur-md p-2 rounded-3xl border border-slate-700/80 shadow-2xl`}>
+              <button
+                onTouchStart={() => setTouchSteer(-1)}
+                onTouchEnd={() => setTouchSteer(0)}
+                onMouseDown={() => setTouchSteer(-1)}
+                onMouseUp={() => setTouchSteer(0)}
+                className="w-16 h-20 bg-gradient-to-t from-slate-800 to-slate-700 border border-slate-600 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-lg active:bg-slate-600 active:scale-95 transition-transform"
+              >
+                ◀
+              </button>
+              <button
+                onTouchStart={() => setTouchSteer(1)}
+                onTouchEnd={() => setTouchSteer(0)}
+                onMouseDown={() => setTouchSteer(1)}
+                onMouseUp={() => setTouchSteer(0)}
+                className="w-16 h-20 bg-gradient-to-t from-slate-800 to-slate-700 border border-slate-600 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-lg active:bg-slate-600 active:scale-95 transition-transform"
+              >
+                ▶
+              </button>
+            </div>
+          )}
 
-          {/* Pedals (Gas, Brake, Nitro) */}
+          {/* Pedals */}
           <div className="flex gap-3 bg-slate-900/80 backdrop-blur-md p-2.5 rounded-3xl border border-slate-700/80 shadow-2xl">
             <button
               onTouchStart={() => setIsBraking(true)}
@@ -527,12 +613,88 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           </div>
         </div>
 
+        {/* Settings Modal */}
+        {showSettingsModal && (
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-40 p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <h3 className="text-lg font-bold text-white mb-2">إعدادات التحكم والدواسات (Release 1.6)</h3>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">شكل الدواسات والمقود</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => { setSteeringStyle('classic'); localStorage.setItem('remocar_steering_style', 'classic'); }}
+                    className={`py-2 rounded-xl text-xs font-bold border ${steeringStyle === 'classic' ? 'bg-red-600 border-red-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}
+                  >
+                    كلاسيكي
+                  </button>
+                  <button
+                    onClick={() => { setSteeringStyle('slanted'); localStorage.setItem('remocar_steering_style', 'slanted'); }}
+                    className={`py-2 rounded-xl text-xs font-bold border ${steeringStyle === 'slanted' ? 'bg-red-600 border-red-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}
+                  >
+                    سباقي مائل
+                  </button>
+                  <button
+                    onClick={() => { setSteeringStyle('circular'); localStorage.setItem('remocar_steering_style', 'circular'); }}
+                    className={`py-2 rounded-xl text-xs font-bold border ${steeringStyle === 'circular' ? 'bg-red-600 border-red-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}
+                  >
+                    دائري
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">جهة التحكم</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => { setControlSide('right'); localStorage.setItem('remocar_control_side', 'right'); }}
+                    className={`py-2 rounded-xl text-xs font-bold border ${controlSide === 'right' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}
+                  >
+                    يمين الشاشة
+                  </button>
+                  <button
+                    onClick={() => { setControlSide('left'); localStorage.setItem('remocar_control_side', 'left'); }}
+                    className={`py-2 rounded-xl text-xs font-bold border ${controlSide === 'left' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300'}`}
+                  >
+                    يسار الشاشة
+                  </button>
+                </div>
+              </div>
+
+              {steeringStyle === 'circular' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">حجم المقود الدائري: {wheelSize}px</label>
+                  <input
+                    type="range"
+                    min={80}
+                    max={160}
+                    value={wheelSize}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setWheelSize(val);
+                      localStorage.setItem('remocar_wheel_size', val.toString());
+                    }}
+                    className="w-full accent-red-500"
+                  />
+                </div>
+              )}
+
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-2xl text-sm transition-colors mt-4"
+              >
+                حفظ وإغلاق
+              </button>
+            </div>
+          </div>
+        )}
+
         {gameState === 'countdown' && !isReplayMode && (
           <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center animate-fadeIn z-30">
             <span className="text-8xl font-black text-red-500 mb-4 animate-bounce">
               {countdownNum > 0 ? countdownNum : 'انطلق!'}
             </span>
-            <p className="text-slate-300 text-lg font-bold">سباق ثلاثي الأبعاد مع محاذاة السيارات (Near-Miss Combo)...</p>
+            <p className="text-slate-300 text-lg font-bold">REMOCAR 3D — الإصدار 1.6 (5 زوايا كاميرا ودواسات ذكية)...</p>
           </div>
         )}
 
@@ -543,12 +705,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             </div>
             <h2 className="text-4xl font-black text-white mb-2">أهلاً بك على منصة التتويج!</h2>
             <p className="text-slate-400 text-sm mb-6">
-              التوقيت: <span className="text-white font-bold">{raceTime.toFixed(1)} ث</span> | العملات: <span className="text-amber-400 font-bold">+400</span>
+              التوقيت: <span className="text-white font-bold">{raceTime.toFixed(1)} ث</span> | العملات: <span className="text-amber-400 font-bold">+500</span>
             </p>
 
             <div className="flex items-center gap-4">
               <button
-                onClick={() => onFinishRace(true, 400, recordedFramesRef.current, raceTime)}
+                onClick={() => onFinishRace(true, 500, recordedFramesRef.current, raceTime)}
                 className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-bold px-8 py-3.5 rounded-2xl shadow-lg shadow-red-600/30 transition-all text-base"
               >
                 <span>حفظ النتيجة وتحديث لوحة المتصدرين</span>
