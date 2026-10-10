@@ -1,0 +1,7 @@
+{
+  "name": "Remocar - لعبة سيارات التحكم عن بعد",
+  "description": "لعبة ريموكار الممتعة لسباق سيارات التحكم عن بعد مع خيارات التخصيص، الحلبات المتنوعة، وتطوير الأداء.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
