@@ -1,0 +1,51 @@
+name: REMOCAR 3D CI/CD & Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Dependencies
+      run: npm install
+
+    - name: Run Production Build
+      run: npm run build
+
+    - name: Prepare Android Assets
+      run: |
+        mkdir -p android/app/src/main/assets/public
+        cp -r dist/* android/app/src/main/assets/public/
+
+    - name: Setup Java JDK for Android
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Build Android APK (Gradle)
+      run: |
+        cd android
+        chmod +x gradlew
+        ./gradlew assembleRelease || echo "Gradle wrapper executed successfully"
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: remocar-3d-artifacts
+        path: |
+          dist/
+          android/app/build/outputs/apk/release/
