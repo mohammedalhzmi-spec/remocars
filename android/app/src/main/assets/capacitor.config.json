@@ -1,0 +1,6 @@
+{
+	"appId": "com.mohammedalhzmi.remocar",
+	"appName": "REMOCAR 3D",
+	"webDir": "dist",
+	"bundledWebRuntime": false
+}
