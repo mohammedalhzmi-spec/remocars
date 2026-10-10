@@ -1,4 +1,4 @@
-name: REMOCAR 3D CI/CD & Build
+name: REMOCAR 3D CI/CD & Android APK Build
 
 on:
   push:
@@ -22,30 +22,33 @@ jobs:
     - name: Install Dependencies
       run: npm install --legacy-peer-deps
 
-    - name: Run Production Build
+    - name: Run Production Build (Web & 3D Assets)
       run: npm run build
 
-    - name: Prepare Android Assets
+    - name: Prepare Android Web Assets (Capacitor www)
       run: |
         mkdir -p android/app/src/main/assets/public
         cp -r dist/* android/app/src/main/assets/public/
 
-    - name: Setup Java JDK for Android
+    - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Build Android APK (Gradle)
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Build Android APK (Gradle assembleRelease)
       run: |
         cd android
         chmod +x gradlew
-        ./gradlew assembleRelease || echo "Gradle wrapper executed successfully"
+        ./gradlew assembleRelease
 
-    - name: Upload Build Artifacts
+    - name: Upload APK & Web Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: remocar-3d-artifacts
+        name: remocar-3d-apk-release
         path: |
           dist/
           android/app/build/outputs/apk/release/
